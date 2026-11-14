@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#16a34a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Diario">
+  <title>Diario Nutrición</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <button class="icon-btn" id="prevDay" aria-label="Día anterior">‹</button>
+    <button class="date-btn" id="dateLabel" aria-label="Elegir fecha">
+      <span id="dateText">—</span>
+      <input type="date" id="dateInput" aria-label="Fecha">
+    </button>
+    <button class="icon-btn" id="nextDay" aria-label="Día siguiente">›</button>
+    <button class="sync" id="syncBadge" aria-label="Estado de sincronización"></button>
+    <button class="icon-btn" id="openSettings" aria-label="Ajustes">⚙︎</button>
+  </header>
+
+  <main id="main">
+    <button class="today-link" id="goToday" hidden>Volver a hoy</button>
+    <p class="menu-hint" id="menuHint" hidden></p>
+    <section>
+      <h2>Actividad</h2>
+      <div class="grid" data-group="act"></div>
+    </section>
+    <section>
+      <h2>Comidas</h2>
+      <div class="grid" data-group="meal"></div>
+    </section>
+    <section>
+      <h2>Alrededor del deporte</h2>
+      <div class="grid" data-group="sport"></div>
+    </section>
+    <section>
+      <h2>Otros</h2>
+      <div class="grid" data-group="other"></div>
+    </section>
+  </main>
+
+  <!-- Hoja de registro -->
+  <dialog id="entrySheet" class="sheet">
+    <form method="dialog" id="entryForm">
+      <header class="sheet-head">
+        <h3 id="sheetTitle">—</h3>
+        <button type="button" class="icon-btn" data-close aria-label="Cerrar">✕</button>
+      </header>
+
+      <div class="current" id="currentBox" hidden>
+        <div class="current-head">
+          <span>Ya en el Sheet</span>
+          <button type="button" class="link" id="editCellBtn">Editar celda</button>
+        </div>
+        <pre id="currentText"></pre>
+      </div>
+
+      <label class="field time-field">Hora
+        <input type="time" id="timeInput" required>
+      </label>
+
+      <div class="seg" id="modeSeg" role="tablist" hidden>
+        <button type="button" data-mode="fields" class="on">Campos</button>
+        <button type="button" data-mode="text">Texto libre</button>
+      </div>
+
+      <div id="fieldsBox"></div>
+
+      <div id="foodBox" hidden>
+        <div class="chips" id="quickChips"></div>
+        <label class="field">Qué has comido y bebido
+          <textarea id="foodText" rows="3" placeholder="Ej: Café con leche, pan integral con tomate y queso de burgos"></textarea>
+        </label>
+        <div class="harvard">
+          <label class="switch"><input type="checkbox" id="harvardOn"> Valorar plato Harvard</label>
+          <div class="chips harvard-items" id="harvardItems" hidden></div>
+        </div>
+      </div>
+
+      <label class="field">Así quedará en el Sheet
+        <textarea id="lineText" rows="2" required></textarea>
+      </label>
+      <p class="hint" id="harvardPreview" hidden></p>
+
+      <div class="actions">
+        <button type="button" class="ghost" id="favBtn">☆ Favorito</button>
+        <button type="submit" class="primary" id="saveBtn">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Editar celda completa -->
+  <dialog id="editSheet" class="sheet">
+    <form method="dialog" id="editForm">
+      <header class="sheet-head">
+        <h3 id="editTitle">Editar celda</h3>
+        <button type="button" class="icon-btn" data-close aria-label="Cerrar">✕</button>
+      </header>
+      <p class="hint">Cada línea es un registro. Lo que guardes sustituye a la celda entera.</p>
+      <textarea id="editText" rows="8"></textarea>
+      <div class="actions">
+        <button type="submit" class="primary">Guardar celda</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Ajustes -->
+  <dialog id="settingsSheet" class="sheet">
+    <form method="dialog" id="settingsForm">
+      <header class="sheet-head">
+        <h3>Ajustes</h3>
+        <button type="button" class="icon-btn" data-close aria-label="Cerrar">✕</button>
+      </header>
+      <label class="field">URL de la aplicación web (Apps Script)
+        <input type="url" id="urlInput" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off">
+      </label>
+      <label class="field">Token
+        <input type="password" id="tokenInput" autocomplete="off">
+      </label>
+      <p class="hint" id="settingsStatus"></p>
+      <div class="actions">
+        <button type="button" class="ghost" id="testBtn">Probar conexión</button>
+        <button type="submit" class="primary">Guardar</button>
+      </div>
+      <details class="pending">
+        <summary>Pendientes de enviar (<span id="pendingCount">0</span>)</summary>
+        <ul id="pendingList"></ul>
+        <button type="button" class="ghost danger" id="clearQueueBtn">Descartar pendientes</button>
+      </details>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
