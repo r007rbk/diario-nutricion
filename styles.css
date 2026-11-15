@@ -142,6 +142,17 @@ textarea { resize: vertical; }
 .chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .chip.fav { border-color: color-mix(in srgb, var(--warn) 50%, var(--line)); }
 .chips .other { flex: 1; min-width: 110px; padding: 7px 12px !important; border-radius: 999px !important; font-size: 14px !important; }
+.block { display: flex; flex-direction: column; gap: 6px; }
+.block-label { font-size: 13px; color: var(--muted); font-weight: 600; }
+.chip.combo { white-space: normal; text-align: left; border-radius: 12px; }
+.chip.more { border-style: dashed; color: var(--muted); }
+.search, .list-input {
+  width: 100%; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--bg); font-size: 16px; color: var(--text);
+}
+.search:focus, .list-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+#foodBox { display: flex; flex-direction: column; gap: 12px; }
+#foodBox[hidden] { display: none; }
 .harvard { display: flex; flex-direction: column; gap: 8px; }
 .switch { display: flex; align-items: center; gap: 8px; font-size: 15px; }
 .switch input { width: 20px; height: 20px; accent-color: var(--accent); }

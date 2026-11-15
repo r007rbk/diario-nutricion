@@ -75,10 +75,39 @@
       <div id="fieldsBox"></div>
 
       <div id="foodBox" hidden>
-        <div class="chips" id="quickChips"></div>
-        <label class="field">Qué has comido y bebido
-          <textarea id="foodText" rows="3" placeholder="Ej: Café con leche, pan integral con tomate y queso de burgos"></textarea>
+        <p class="hint ideal" id="idealHint" hidden></p>
+
+        <div class="block">
+          <span class="block-label">Lugar</span>
+          <div class="chips" id="placeChips">
+            <input type="text" id="placeOther" class="other" placeholder="Otro…" aria-label="Otro lugar">
+          </div>
+        </div>
+
+        <input type="search" id="searchInput" class="search" placeholder="Buscar en el histórico…" autocomplete="off">
+
+        <div class="block" id="combosBlock">
+          <span class="block-label">Combinaciones habituales</span>
+          <div class="chips" id="comboChips"></div>
+        </div>
+        <div class="block">
+          <span class="block-label">Comida</span>
+          <div class="chips" id="itemChips"></div>
+        </div>
+        <label class="field">Qué has comido
+          <textarea id="foodText" rows="2" placeholder="Toca arriba o escribe: café con leche, pan integral con tomate…"></textarea>
         </label>
+
+        <div class="block">
+          <span class="block-label">💧 Bebida</span>
+          <div class="chips" id="drinkChips"></div>
+          <input type="text" id="drinkText" class="list-input" placeholder="Ej: agua, cerveza 0" autocomplete="off">
+        </div>
+        <div class="block">
+          <span class="block-label">💊 Suplementos</span>
+          <div class="chips" id="suppChips"></div>
+          <input type="text" id="suppText" class="list-input" placeholder="Ej: Natalbel, vitamina D" autocomplete="off">
+        </div>
         <div class="harvard">
           <label class="switch"><input type="checkbox" id="harvardOn"> Valorar plato Harvard</label>
           <div class="chips harvard-items" id="harvardItems" hidden></div>
