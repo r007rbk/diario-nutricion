@@ -1,7 +1,7 @@
 'use strict';
 
 // Cambia junto con ?v= en index.html y VERSION en sw.js.
-const APP_VERSION = 5;
+const APP_VERSION = 6;
 
 // Si algo falla, que se vea en pantalla en lugar de no hacer nada.
 window.addEventListener('error', e => toast(`Error: ${e.message}`));
@@ -115,6 +115,7 @@ const state = {
   config: store.get('config', null),      // listas de botones y diccionario (guardado en el script)
   configLoaded: !!store.get('config', null),
   scriptVersion: null,
+  strava: store.get('strava', { status: null, pending: [], at: 0 }),
   view: store.get('view', 'register'),
   weekStart: null,
   lastError: ''
@@ -205,6 +206,8 @@ async function flush() {
         const { results } = await api({ action: 'add', entries: [{ id: op.id, date: op.date, slot: op.slot, line: op.line }] });
         const r = results[0];
         if (!r.ok) throw new Error(r.error);
+      } else if (op.op === 'stravaMark') {
+        await api({ action: 'stravaMark', id: op.stravaId, status: op.status });
       } else if (op.op === 'config') {
         await api({ action: 'setConfig', name: op.name, value: op.value });
       } else if (op.op === 'groups') {
@@ -248,6 +251,7 @@ function render() {
   $('#menuHint').hidden = !hint;
   $('#menuHint').textContent = hint ? `Plan del día: ${hint.replace(/\n/g, ' · ')}` : '';
   renderTodayPlan();
+  renderStravaCard();
 
   document.querySelectorAll('.grid').forEach(grid => {
     grid.innerHTML = '';
@@ -285,7 +289,7 @@ function renderSync() {
   $('#pendingList').innerHTML = '';
   state.queue.forEach(op => {
     const li = document.createElement('li');
-    li.textContent = op.op === 'groups' ? `Corrección: ${op.key}` : op.op === 'config' ? `Ajuste: ${op.name}`
+    li.textContent = op.op === 'groups' ? `Corrección: ${op.key}` : op.op === 'config' ? `Ajuste: ${op.name}` : op.op === 'stravaMark' ? `Strava: actividad ${op.status === 'added' ? 'añadida' : 'descartada'}`
       : `${op.date} · ${SLOT[op.slot].short || SLOT[op.slot].label}: ${op.op === 'add' ? op.line : '(celda editada)'}`;
     $('#pendingList').appendChild(li);
   });
@@ -328,6 +332,7 @@ function openEntry(key) {
 
   if (isActivity) buildActivityFields(slot.kind);
   form.planGroup = null;
+  form.stravaId = null;
   if (slot.kind === 'food') { buildFoodBox(slot, view.menu); renderPlanBlock(); renderDetected(); }
   applyMode();
   updateLine();
@@ -674,6 +679,15 @@ function saveEntry(e) {
     line = `${sheetTime($('#timeInput').value)} ${line}`;
   }
   enqueue({ op: 'add', date: state.date, slot: slot.key, line });
+  if (form.stravaId) {
+    // Después de la línea en la cola: si no llega a escribirse, la actividad no se da por añadida.
+    state.strava.pending = (state.strava.pending || []).filter(x => x.id !== form.stravaId);
+    store.set('strava', state.strava);
+    state.queue.push({ id: uid(), at: Date.now(), op: 'stravaMark', stravaId: form.stravaId, status: 'added' });
+    store.set('queue', state.queue);
+    form.stravaId = null;
+    render();
+  }
   const note = harvardNote();
   if (note) enqueue({ op: 'add', date: state.date, slot: 'COMENT', line: note });
   if (slot.kind === 'food') rememberRecent(slot.key, clean($('#foodText').value));
@@ -735,6 +749,7 @@ function saveSettings(e) {
   toast('Guardado ✓');
   refreshDay(state.date);
   loadConfig();
+  syncStrava(true);
   loadHistory(true);
   loadWeek(mondayOf(state.date), true);
   flush();
@@ -950,6 +965,7 @@ function switchView(view) {
   } else if (view === 'config') {
     renderConfig();
     loadConfig();
+    syncStrava(true);
   } else {
     render();
   }
@@ -1193,6 +1209,7 @@ function renderConfig() {
   renderSync();
   renderPresetEditor();
   renderDictEditor();
+  renderStravaConfig();
 }
 
 function renderPresetEditor() {
@@ -1524,6 +1541,140 @@ function registerProposal(slot, parts) {
   ta.dispatchEvent(new Event('input'));
 }
 
+// ───────────────────────── Strava ─────────────────────────
+
+const STRAVA_MIN_GAP = 5 * 60 * 1000;
+
+/** Pide al script las actividades nuevas (y con "escribir solo", las escribe). */
+async function syncStrava(force) {
+  if (!state.settings.url || !navigator.onLine) return;
+  const s = state.strava;
+  if (s.status && !s.status.connected && !force) return;
+  if (!force && Date.now() - (s.at || 0) < STRAVA_MIN_GAP) return;
+  try {
+    const res = await api({ action: 'stravaSync' });
+    const resolved = new Set(state.queue.filter(op => op.op === 'stravaMark').map(op => op.stravaId));
+    state.strava = { status: res.strava, pending: res.pending.filter(e => !resolved.has(e.id)), at: Date.now() };
+    store.set('strava', state.strava);
+    if (res.written.length) {
+      toast(`Strava: añadido ${res.written.map(e => e.line.replace(/^\d{1,2}:\d{2}\s*/, '')).join(' · ')}`);
+      for (const d of new Set(res.written.map(e => e.date))) await refreshDay(d);
+    }
+    if (state.view === 'config') renderStravaConfig();
+    else render();
+  } catch (err) {
+    state.lastError = err.message;
+    renderSync();
+  }
+}
+
+function renderStravaCard() {
+  const card = $('#stravaCard');
+  const list = $('#stravaList');
+  const pending = (state.strava.pending || []);
+  card.hidden = !pending.length;
+  list.innerHTML = '';
+  pending.forEach(e => {
+    const row = document.createElement('div');
+    row.className = 'strava-item';
+    const d = parseIso(e.date);
+    const title = document.createElement('p');
+    title.className = 'strava-line';
+    title.textContent = e.line;
+    const meta = document.createElement('p');
+    meta.className = 'hint';
+    meta.textContent = `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]} · ${SLOT[e.slot].label}${e.name ? ' · «' + e.name + '»' : ''}`;
+    row.append(title, meta);
+    if (e.existing) {
+      const ex = document.createElement('p');
+      ex.className = 'hint';
+      ex.textContent = `Ya tienes en el Sheet: ${e.existing.split('\n').join(' · ')}`;
+      row.appendChild(ex);
+    }
+    if (e.error) {
+      const er = document.createElement('p');
+      er.className = 'hint';
+      er.textContent = `⚠︎ ${e.error}`;
+      row.appendChild(er);
+    }
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+    const dismiss = document.createElement('button');
+    dismiss.type = 'button';
+    dismiss.className = 'ghost';
+    dismiss.textContent = 'Descartar';
+    dismiss.addEventListener('click', () => resolveStrava(e.id, 'dismissed'));
+    const review = document.createElement('button');
+    review.type = 'button';
+    review.className = 'primary';
+    review.textContent = 'Revisar y añadir';
+    review.disabled = !!e.error;
+    review.addEventListener('click', () => reviewStrava(e));
+    actions.append(dismiss, review);
+    row.appendChild(actions);
+    list.appendChild(row);
+  });
+}
+
+/** Abre el registro de esa actividad con la línea ya escrita, para añadir "base", "ritmo bajo"… */
+function reviewStrava(e) {
+  if (state.view !== 'register') switchView('register');
+  setDate(e.date);
+  openEntry(e.slot);
+  form.stravaId = e.id;
+  form.mode = 'text';
+  applyMode();
+  $('#timeInput').value = e.time.padStart(5, '0');
+  $('#lineText').value = e.line;
+  form.lineDirty = true;
+  updateLine();
+}
+
+function resolveStrava(id, status) {
+  state.strava.pending = (state.strava.pending || []).filter(e => e.id !== id);
+  store.set('strava', state.strava);
+  state.queue.push({ id: uid(), at: Date.now(), op: 'stravaMark', stravaId: id, status });
+  store.set('queue', state.queue);
+  render();
+  flush();
+}
+
+function renderStravaConfig() {
+  const st = state.strava.status;
+  $('#stravaSetup').hidden = !st || st.configured;
+  $('#stravaStatus').textContent = !st ? 'Comprobando…'
+    : !st.configured ? 'Sin configurar.'
+      : st.connected ? `✓ Conectado${st.athlete ? ' como ' + st.athlete : ''}.` : 'No conectado.';
+  $('#stravaAuto').checked = !!(state.config && state.config.STRAVA_SETTINGS && state.config.STRAVA_SETTINGS.auto);
+  $('#stravaAuto').disabled = !st || !st.connected;
+  $('#stravaConnectBtn').hidden = !st || !st.configured;
+  $('#stravaConnectBtn').textContent = st && st.connected ? 'Reconectar' : 'Conectar con Strava';
+  $('#stravaDisconnectBtn').hidden = !st || !st.connected;
+}
+
+async function connectStrava() {
+  try {
+    const { url } = await api({ action: 'stravaAuthUrl', redirect: state.settings.url });
+    // En el iPhone se abre en Safari; al terminar, vuelve a la app.
+    window.open(url, '_blank') || (location.href = url);
+    toast('Autoriza en Strava y vuelve a la app');
+  } catch (err) {
+    toast(`Error: ${err.message}`);
+  }
+}
+
+async function disconnectStrava() {
+  if (!confirm('¿Desconectar Strava? Dejará de proponerte actividades.')) return;
+  try {
+    const res = await api({ action: 'stravaDisconnect' });
+    state.strava = { status: res.strava, pending: [], at: Date.now() };
+    store.set('strava', state.strava);
+    renderStravaConfig();
+  } catch (err) {
+    toast(`Error: ${err.message}`);
+  }
+}
+
 // ───────────────────────── Arranque ─────────────────────────
 
 function init() {
@@ -1541,6 +1692,12 @@ function init() {
   $('#groupsForm').addEventListener('submit', saveGroups);
   $('#presetAddForm').addEventListener('submit', addPreset);
   $('#reloadBtn').addEventListener('click', () => location.reload());
+  $('#stravaConnectBtn').addEventListener('click', connectStrava);
+  $('#stravaDisconnectBtn').addEventListener('click', disconnectStrava);
+  $('#stravaAuto').addEventListener('change', e => {
+    saveConfig('STRAVA_SETTINGS', { auto: e.target.checked });
+    toast(e.target.checked ? 'Las actividades se escribirán solas' : 'Te propondré cada actividad');
+  });
   $('#goToday').addEventListener('click', () => setDate(isoDate(new Date())));
   $('#dateInput').addEventListener('change', e => {
     if (!e.target.value) return;
@@ -1627,6 +1784,7 @@ function init() {
     flush();
     refreshDay(state.date);
     loadWeek(mondayOf(state.date));
+    syncStrava(state.view === 'config');   // al volver de autorizar en Strava, se actualiza
   });
 
   store.set('lastOpen', state.date);
@@ -1639,6 +1797,7 @@ function init() {
   loadHistory();
   loadWeek(state.weekStart);
   flush();
+  syncStrava();
 
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 }

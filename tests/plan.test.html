@@ -1,0 +1,112 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Tests menú ideal</title>
+<pre id="out">Ejecutando…</pre>
+<script src="../plan.js"></script>
+<script>
+const results = [];
+function eq(name, got, want) {
+  const norm = v => JSON.stringify(Array.isArray(v) ? [...v].sort() : v);
+  const ok = norm(got) === norm(want);
+  results.push(`${ok ? '✅' : '❌'} ${name}${ok ? '' : `\n   obtenido: ${JSON.stringify(got)}\n   esperado: ${JSON.stringify(want)}`}`);
+}
+const groups = t => classifyMeal(t).groups;
+
+(async () => {
+  // ── Diccionario ──
+  eq('paella con verduras y rape', groups('15:00 Paella con verduras y rape. Pan integral'), ['CHO', 'VERDURA', 'PESCADO']);
+  eq('desayuno', groups('9:30 Cafe con leche Pan integral con tomate y queso de burgos'), ['LACTEO', 'CHO']);
+  eq('judías verdes no es legumbre', groups('judias verdes con huevo duro'), ['VERDURA', 'HUEVO']);
+  eq('judías pintas sí', groups('Arroz integral con judias pintas con pollo con tomate'), ['CHO', 'LEGUMBRE', 'CARNE', 'VERDURA']);
+  eq('tortita no es huevo', groups('1 tortita integral con pollo'), ['CHO', 'CARNE']);
+  eq('tortilla de patata', groups('pincho de tortilla de patata'), ['HUEVO', 'CHO']);
+  eq('panceta no es pan', groups('panceta a la plancha'), ['CARNE']);
+  eq('fruta y frutos secos', groups('Yogurt natural con avena, arandanos rojos deshidratados, nueces y almendras'), ['LACTEO', 'CHO', 'FRUTA', 'FS']);
+  eq('bebida y suplementos no cuentan', groups('8:15 en casa. Pera. Bebida: leche. Suplementos: Natalbel'), ['FRUTA']);
+  eq('corrección manda', classifyMeal('Poke de la esquina', { 'poke de la esquina': ['PESCADO', 'CHO', 'VERDURA'] }).groups, ['PESCADO', 'CHO', 'VERDURA']);
+
+  // ── Diccionario editable ──
+  eq('cortado es lácteo por defecto', groups('cortado'), ['LACTEO']);
+  setCustomDictionary({ add: { PESCADO: ['poke'] }, remove: { LACTEO: ['cortado'] } });
+  eq('quitar palabra', groups('cortado'), []);
+  eq('añadir palabra', groups('poke de salmón'), ['PESCADO']);
+  eq('marca las añadidas', dictionaryWords('PESCADO').filter(w => w.custom).map(w => w.word), ['poke']);
+  setCustomDictionary(null);
+  eq('restablecer', groups('cortado'), ['LACTEO']);
+
+  // ── Esquema ──
+  const fixture = await (await fetch('fixture.json')).json();
+  const toVal = v => (v && typeof v === 'object' && v.date) ? v.date : (v ?? '');
+  const schemeValues = fixture['ESQUEMA DE MENÚ IDEAL'].map(r => r.map(toVal));
+  const scheme = parseScheme(schemeValues);
+  const g = (d, s) => scheme[d].slots[s] && scheme[d].slots[s].groups.map(x => x.g);
+  eq('lunes comida', g(0, 'COM'), ['VERDURA', 'CHO', 'PESCADO']);
+  eq('martes comida', g(1, 'COM'), ['VERDURA', 'LEGUMBRE']);
+  eq('lunes MM2', g(0, 'MM2'), ['FRUTA', 'CHO', 'LACTEO', 'FS']);
+  eq('martes post-entreno (solo si entrenas)', [g(1, 'DE'), scheme[1].slots.DE.training], [['FRUTA', 'LACTEO'], true]);
+  eq('sábado comida: verdura + CHO + a elegir', [g(5, 'COM'), scheme[5].slots.COM.libre], [['VERDURA', 'CHO'], true]);
+  eq('sábado durante', [!!scheme[5].slots.DU, scheme[5].slots.DU.training, !scheme[5].slots.MM2], [true, true, true]);
+  eq('sábado post-entreno con nota', scheme[5].slots.DE.groups, [{ g: 'FRUTA', note: '' }, { g: 'CHO', note: 'no integral' }, { g: 'LACTEO', note: 'desnatado' }]);
+  const weekTotals = {};
+  scheme.forEach(d => Object.values(d.slots).forEach(s => !s.training && s.groups.forEach(x => { weekTotals[x.g] = (weekTotals[x.g] || 0) + 1; })));
+  results.push(`ℹ️ objetivos semanales sin post-entreno: ${JSON.stringify(weekTotals)}`);
+  eq('pescado 4 a la semana', weekTotals.PESCADO, 4);
+
+  // ── Semana real 9–15 nov 2026 (solo hay datos el 14) ──
+  const sh = fixture['2026'];
+  const header = sh[1];
+  const col = name => header.findIndex(h => String(h || '').trim().toUpperCase() === name);
+  const SL = { GYM: 'GYM', ENT: 'ENTRENAMIENTO', BAS: 'BASICO', DES: 'DES', MM1: 'MM 1', MM2: 'MM 2', COM: 'COM', MER: 'MER', AE: 'AE', DU: 'DU', DE: 'DE', CEN: 'CEN', COMENT: 'COMENTARIOS' };
+  const dayData = row => { const slots = {}; Object.entries(SL).forEach(([k, h]) => { slots[k] = String(row[col(h)] || ''); }); return { date: row[1].date, slots }; };
+  const week = sh.slice(2, 9).map(dayData);
+  eq('semana empieza en lunes', [week[0].date, mondayOf('2026-11-14')], ['2026-11-09', '2026-11-09']);
+  const ev = evaluateWeek(scheme, week, {}, '2026-11-14');
+  const sat = ev.days[5];
+  eq('sábado entrenó → cuenta post-entreno', [sat.trained, !!sat.expectedSlots.DE], [true, true]);
+  eq('sábado: lo que hubo', sat.actual, { LACTEO: 2, CHO: 2, VERDURA: 1, PESCADO: 1, FRUTA: 1 });
+  eq('pendiente (lun-vie sin registrar)', ev.pending.PESCADO, 4);
+  eq('fruta no se arrastra, pescado sí', [ev.pending.FRUTA, ev.pending.PESCADO > 0], [undefined, true]);
+  eq('domingo es futuro', ev.days[6].status, 'future');
+  const sug = suggestGroups(ev, '2026-11-14', 'CEN').map(s => `${s.g}:${s.reason}`);
+  eq('sugerencias cena del sábado', sug.slice(0, 3), ['VERDURA:scheme', 'CHO:scheme', 'LACTEO:scheme']);
+  eq('incluye pescado pendiente', sug.includes('PESCADO:pending'), true);
+
+  // ── Proponer comidas ──
+  const C = t => ({ text: t, groups: classifyMeal(t).groups, combo: t.includes(',') });
+  const cands = ['Pollo con arroz', 'Lentejas con verduras', 'Pan integral', 'Yogur natural', 'Ensalada de lechuga, tomate', 'Merluza con patata', 'Plátano'].map(C);
+  const p1 = proposeMeals([{ g: 'VERDURA', weight: 1 }, { g: 'CHO', weight: 1 }, { g: 'LEGUMBRE', weight: 3 }], cands);
+  eq('primera propuesta cubre lo pendiente', p1[0].parts[0], 'Lentejas con verduras');
+  eq('se completa con CHO', [p1[0].parts.includes('Pan integral'), p1[0].missing], [true, []]);
+  eq('hay alternativas distintas', p1.length > 1 && p1[1].parts[0] !== p1[0].parts[0], true);
+  const p3 = proposeMeals([{ g: 'CARNE', weight: 1 }, { g: 'HUEVO', weight: 3 }, { g: 'LEGUMBRE', weight: 3 }, { g: 'VERDURA', weight: 1 }],
+    ['Tortilla francesa', 'Lentejas con verduras', 'Hamburguesa con patatas', 'Ensalada de lechuga'].map(C));
+  eq('una sola proteína por comida', p3.every(p => p.parts.filter(t => classifyMeal(t).groups.some(g => ['CARNE', 'HUEVO', 'LEGUMBRE', 'PESCADO'].includes(g))).length === 1), true);
+  eq('empieza por lo pendiente', p3[0].parts[0], 'Lentejas con verduras');
+  eq('el resto queda para otra comida', [p3[0].later.sort(), p3[0].missing], [['CARNE', 'HUEVO'], []]);
+  const p2 = proposeMeals([{ g: 'FRUTA', weight: 1 }, { g: 'LACTEO', weight: 1 }], cands);
+  eq('merienda: fruta + lácteo', [...p2[0].parts].sort(), ['Plátano', 'Yogur natural']);
+  eq('sin necesidades no propone nada', proposeMeals([], cands), []);
+
+  // ── Cobertura del diccionario con todo tu histórico ──
+  const FOOD = ['DES', 'MM1', 'MM2', 'COM', 'MER', 'AE', 'DU', 'DE', 'CEN'];
+  let cells = 0, classified = 0;
+  const unknown = {};
+  for (const name of ['2024', '2025', '2026']) {
+    for (const row of fixture[name].slice(2)) {
+      const d = dayData(row);
+      for (const s of FOOD) {
+        const t = d.slots[s];
+        if (!t.trim()) continue;
+        cells++;
+        const c = classifyMeal(t);
+        if (c.groups.length) classified++;
+        c.pieces.filter(p => !p.groups.length).forEach(p => { unknown[p.key] = (unknown[p.key] || 0) + 1; });
+      }
+    }
+  }
+  results.push(`ℹ️ celdas con algún grupo: ${classified}/${cells} (${Math.round(100 * classified / cells)}%)`);
+  results.push(`ℹ️ trozos sin grupo más frecuentes: ${Object.entries(unknown).sort((a, b) => b[1] - a[1]).slice(0, 60).map(([k, n]) => `${k}(${n})`).join(', ')}`);
+
+  document.getElementById('out').textContent = results.join('\n');
+})().catch(e => { document.getElementById('out').textContent = 'ERROR ' + e.stack; });
+</script>

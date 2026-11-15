@@ -1,0 +1,237 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Tests Apps Script</title>
+<pre id="out">Ejecutando…</pre>
+<script>
+// ── Simulación mínima de SpreadsheetApp a partir de tests/fixture.json ──
+function makeSheet(name, rows) {
+  const toVal = v => (v && typeof v === 'object' && v.date)
+    ? new Date(+v.date.slice(0, 4), +v.date.slice(5, 7) - 1, +v.date.slice(8, 10)) : (v ?? '');
+  const data = rows.map(r => r.map(toVal));
+  return {
+    data,
+    getName: () => name,
+    getMaxRows: () => data.length,
+    getLastColumn: () => data[0].length,
+    getLastRow: () => data.length,
+    getRange(row, col, nr = 1, nc = 1) {
+      return {
+        getValue: () => data[row - 1][col - 1],
+        getValues: () => Array.from({ length: nr }, (_, i) => data[row - 1 + i].slice(col - 1, col - 1 + nc)),
+        setValue: v => { data[row - 1][col - 1] = v; }
+      };
+    }
+  };
+}
+const pad = n => String(n).padStart(2, '0');
+window.Utilities = { formatDate: d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`, getUuid: () => 'uuid-' + Math.random().toString(36).slice(2) };
+window.HtmlService = { createHtmlOutput: html => ({ html, setTitle() { return this; } }) };
+// Strava simulado
+const fetchLog = [];
+window.stravaFake = { activities: [], tokenExpiresIn: 3600 };
+window.UrlFetchApp = { fetch(url, opts = {}) {
+  fetchLog.push({ url, opts });
+  const reply = (code, obj) => ({ getResponseCode: () => code, getContentText: () => JSON.stringify(obj) });
+  if (url.endsWith('/oauth/token')) {
+    const p = opts.payload;
+    if (p.grant_type === 'authorization_code' && p.code === 'buen-codigo') return reply(200, { access_token: 'A1', refresh_token: 'R1', expires_at: Math.floor(Date.now() / 1000) + stravaFake.tokenExpiresIn, athlete: { firstname: 'Ana', lastname: 'P' } });
+    if (p.grant_type === 'refresh_token' && p.refresh_token.startsWith('R')) return reply(200, { access_token: 'A2', refresh_token: 'R2', expires_at: Math.floor(Date.now() / 1000) + 3600 });
+    return reply(400, { message: 'Bad Request' });
+  }
+  if (url.includes('/athlete/activities')) {
+    if (!/^Bearer A\d$/.test(opts.headers.Authorization)) return reply(401, {});
+    return reply(200, stravaFake.activities);
+  }
+  if (url.endsWith('/oauth/deauthorize')) return reply(200, {});
+  return reply(404, {});
+} };
+window.ContentService = { createTextOutput: s => ({ s, setMimeType() { return JSON.parse(s); } }), MimeType: {} };
+window.LockService = { getDocumentLock: () => ({ waitLock() {}, releaseLock() {} }) };
+const props = { API_TOKEN: 'secreto' };
+window.PropertiesService = { getScriptProperties: () => ({ getProperty: k => props[k] ?? null, setProperty: (k, v) => { props[k] = v; }, deleteProperty: k => { delete props[k]; }, getProperties: () => ({ ...props }) }) };
+
+const results = [];
+function eq(name, got, want) {
+  const ok = JSON.stringify(got) === JSON.stringify(want);
+  results.push(`${ok ? '✅' : '❌'} ${name}${ok ? '' : `\n   obtenido: ${JSON.stringify(got)}\n   esperado: ${JSON.stringify(want)}`}`);
+}
+
+(async () => {
+  const code = await (await fetch('../apps-script/Code.gs')).text();
+  (0, eval)(code);
+  const fixture = await (await fetch('fixture.json')).json();
+  const sheets = Object.entries(fixture).map(([n, r]) => makeSheet(n, r));
+  window.SpreadsheetApp = {
+    getActiveSpreadsheet: () => ({ getSheets: () => sheets, getSpreadsheetTimeZone: () => 'Europe/Madrid' }),
+    flush() {}
+  };
+  const call = req => doPost({ postData: { contents: JSON.stringify({ token: 'secreto', ...req }) } });
+  const s2026 = sheets.find(s => s.getName() === '2026');
+
+  // Cabeceras → columnas (C=3 … O=15)
+  eq('mapa de cabeceras', mapHeaders(s2026.data[1]),
+    { GYM: 3, ENT: 4, BAS: 5, DES: 6, MM1: 7, MM2: 8, COM: 9, MER: 10, AE: 11, DU: 12, DE: 13, CEN: 14, COMENT: 15 });
+
+  // Leer el 14/11/2026: fila 8, con los datos de la captura
+  const d = call({ action: 'day', date: '2026-11-14' });
+  eq('día 14/11/2026 → pestaña 2026 fila 8', [d.day.sheet, d.day.row], ['2026', 8]);
+  eq('contenido COM', d.day.slots.COM, '15:00 Paella con verduras y rape. Pan integral');
+
+  // Menú ideal del sábado
+  eq('menú ideal sábado', d.day.menu, {
+    training: 'ENTRENO ++\nTIRADA LARGA CORRER/BICI\n10 AM (VARIABLE) BICI 4-5 H Y CARRERA 1H30-2 H',
+    DES: 'Lacteo\nFruta', MM2: 'DURANTE', DE: 'Fruta\nCHO NO integral\nLacteo desnatado',
+    COM: 'Verdura\nCHO\n**', MER: 'Fruta\nFS', CEN: 'Verdura\nCHO\nLacteo'
+  });
+  eq('menú ideal martes (post-entreno entre semana)', call({ action: 'day', date: '2026-11-17' }).day.menu.DE, 'Fruta + Lácteo desnatado');
+
+  // Fecha de la temporada 2025
+  const d25 = call({ action: 'day', date: '2025-04-05' });
+  eq('día 05/04/2025 → pestaña 2025 fila 8', [d25.day.sheet, d25.day.row], ['2025', 8]);
+  eq('E de 05/04/2025', d25.day.slots.BAS, 'Caminar por monte 6.86km (2:19)');
+
+  // Añadir a celda con contenido → nueva línea; reintento → sin duplicar
+  const entry = { id: 'a1', date: '2026-11-14', slot: 'COM', line: '17:30 Yogur natural' };
+  eq('añadir', call({ action: 'add', entries: [entry] }).results[0], { id: 'a1', ok: true, duplicate: false });
+  eq('reintento no duplica', call({ action: 'add', entries: [entry] }).results[0], { id: 'a1', ok: true, duplicate: true });
+  eq('celda tras añadir', s2026.data[7][8], '15:00 Paella con verduras y rape. Pan integral\n17:30 Yogur natural');
+
+  // Añadir a celda vacía (CEN del 15/11 → fila 9, col N)
+  call({ action: 'add', entries: [{ id: 'a2', date: '2026-11-15', slot: 'CEN', line: '21:30 Crema de calabacín' }] });
+  eq('celda vacía', s2026.data[8][13], '21:30 Crema de calabacín');
+  eq('otras celdas intactas', s2026.data[8][12], '');
+
+  // Editar celda completa
+  call({ action: 'set', date: '2026-11-15', slot: 'CEN', value: '21:45 Crema de calabacín y huevo' });
+  eq('set', s2026.data[8][13], '21:45 Crema de calabacín y huevo');
+
+  // Errores
+  eq('fecha fuera de rango', call({ action: 'add', entries: [{ id: 'x', date: '2020-01-01', slot: 'COM', line: 'a' }] }).results[0].ok, false);
+  eq('franja desconocida', call({ action: 'set', date: '2026-11-15', slot: 'NOPE', value: 'a' }).ok, false);
+  eq('token incorrecto', doPost({ postData: { contents: JSON.stringify({ token: 'mal', action: 'ping' }) } }).ok, false);
+  eq('ping lista temporadas', call({ action: 'ping' }).sheets.map(s => s.name).sort(), ['2024', '2025', '2026']);
+
+  // ── Semana y correcciones ──
+  const w = call({ action: 'week', start: '2026-11-09' }).week;
+  eq('semana: 7 días desde el lunes', [w.days.length, w.days[0].date, w.days[5].slots.COM], [7, '2026-11-09', '15:00 Paella con verduras y rape. Pan integral\n17:30 Yogur natural']);
+  eq('semana trae el esquema', w.scheme[1][1], 'LUNES');
+  eq('guardar corrección', call({ action: 'setGroups', key: 'poke de la esquina', groups: ['PESCADO', 'CHO', 'NOPE'] }).overrides, { 'poke de la esquina': ['PESCADO', 'CHO'] });
+  eq('se devuelve con la semana', call({ action: 'week', start: '2026-11-09' }).week.overrides, { 'poke de la esquina': ['PESCADO', 'CHO'] });
+  eq('borrar corrección', call({ action: 'setGroups', key: 'poke de la esquina', groups: null }).overrides, {});
+
+  // ── Configuración ──
+  eq('config vacía', call({ action: 'config' }).config, {});
+  eq('guardar lista', call({ action: 'setConfig', name: 'PRESETS_BEBIDAS', value: { items: ['Agua'], hidden: ['vino'] } }).ok, true);
+  eq('leer lista', call({ action: 'config' }).config, { PRESETS_BEBIDAS: { items: ['Agua'], hidden: ['vino'] } });
+  eq('no lee otras propiedades (token)', Object.keys(call({ action: 'config' }).config).includes('API_TOKEN'), false);
+  eq('nombre no permitido', call({ action: 'setConfig', name: 'API_TOKEN', value: 'x' }).ok, false);
+  eq('demasiado largo', call({ action: 'setConfig', name: 'DICT_CUSTOM', value: 'x'.repeat(9500) }).ok, false);
+  eq('borrar lista', [call({ action: 'setConfig', name: 'PRESETS_BEBIDAS', value: null }).ok, call({ action: 'config' }).config], [true, {}]);
+  eq('versión del script', [typeof call({ action: 'ping' }).version, call({ action: 'config' }).version > 0], ['number', true]);
+
+  // ── Strava ──
+  const run = { id: 111, sport_type: 'Run', name: 'Carrera de mañana', start_date_local: '2026-11-14T11:50:12Z', distance: 5020, moving_time: 2340, total_elevation_gain: 12, average_heartrate: 148.6 };
+  const ride = { id: 222, sport_type: 'Ride', name: 'Ruta', start_date_local: '2026-11-15T10:00:00Z', distance: 81300, moving_time: 14400, total_elevation_gain: 1530 };
+  const walk = { id: 333, sport_type: 'Walk', name: 'Paseo', start_date_local: '2026-11-15T18:05:00Z', distance: 6860, moving_time: 8340 };
+  const gym = { id: 444, sport_type: 'WeightTraining', name: 'Pesas', start_date_local: '2026-11-13T19:00:00Z', distance: 0, moving_time: 2700 };
+  eq('carrera con tu formato', stravaToEntry(run).line, '11:50 Carrera 5Km 39min ritmo 7:46/km FC media 149');
+  eq('carrera → ENTRENAMIENTO del día', [stravaToEntry(run).slot, stravaToEntry(run).date], ['ENT', '2026-11-14']);
+  eq('bici larga', stravaToEntry(ride).line, '10:00 Bici 81.3Km 4h 1530m desnivel');
+  eq('caminata → BASICO como "Caminar 6.86km (2:19)"', [stravaToEntry(walk).slot, stravaToEntry(walk).line], ['BAS', '18:05 Caminar 6.86km (2:19)']);
+  eq('pesas → GYM', [stravaToEntry(gym).slot, stravaToEntry(gym).line], ['GYM', '19:00 Fuerza 45min']);
+  eq('hay algo a ±30 min', [hasNearbyLine('11:30 Carrera base', '11:50', 30), hasNearbyLine('9:00 otra cosa', '11:50', 30)], [true, false]);
+
+  eq('sin claves: no conectado', call({ action: 'stravaStatus' }).strava, { configured: false, connected: false, athlete: '', auto: false });
+  eq('sin claves no da URL', call({ action: 'stravaAuthUrl', redirect: 'https://script.google.com/macros/s/X/exec' }).ok, false);
+  props.STRAVA_CLIENT_ID = '12345'; props.STRAVA_CLIENT_SECRET = 'secreto-strava';
+  eq('URL de vuelta de otro sitio, no', call({ action: 'stravaAuthUrl', redirect: 'https://malo.com/exec' }).ok, false);
+  const auth = call({ action: 'stravaAuthUrl', redirect: 'https://script.google.com/macros/s/X/exec' });
+  const state = new URL(auth.url).searchParams.get('state');
+  eq('URL de autorización', [auth.url.startsWith('https://www.strava.com/oauth/authorize?client_id=12345'), new URL(auth.url).searchParams.get('scope'), auth.url.includes('secreto-strava')], [true, 'read,activity:read_all', false]);
+  eq('vuelta con state falso', doGet({ parameter: { state: 'falso', code: 'buen-codigo', scope: 'read,activity:read_all' } }).html.includes('caducado'), true);
+  eq('vuelta sin permiso de actividades', doGet({ parameter: { state: JSON.parse(props.STRAVA_STATE || '{}').state || state, code: 'buen-codigo', scope: 'read' } }).html.includes('Falta un permiso'), true);
+  const auth2 = call({ action: 'stravaAuthUrl', redirect: 'https://script.google.com/macros/s/X/exec' });
+  const st2 = new URL(auth2.url).searchParams.get('state');
+  eq('vuelta correcta', doGet({ parameter: { state: st2, code: 'buen-codigo', scope: 'read,activity:read_all' } }).html.includes('Strava conectado'), true);
+  eq('el state no se reutiliza', doGet({ parameter: { state: st2, code: 'buen-codigo', scope: 'read,activity:read_all' } }).html.includes('caducado'), true);
+  eq('conectado', call({ action: 'stravaStatus' }).strava, { configured: true, connected: true, athlete: 'Ana P', auto: false });
+
+  // Sin "escribir solo": propone y no escribe
+  props.STRAVA_CONNECTED_AT = String(Date.now() - 3 * 86400000);
+  stravaFake.activities = [run, walk];
+  const s2026s = sheets.find(s => s.getName() === '2026');
+  const before = s2026s.data[7][3];
+  let sync = call({ action: 'stravaSync' });
+  eq('propone sin escribir', [sync.pending.map(e => e.id), sync.written.length, s2026s.data[7][3] === before], [['111', '333'], 0, true]);
+  eq('enseña lo que ya hay en la celda', sync.pending[0].existing, '11:50 Carrera base 5Km ritmo bajo 39min');
+  call({ action: 'stravaMark', id: '111', status: 'dismissed' });
+  eq('descartada no vuelve', call({ action: 'stravaSync' }).pending.map(e => e.id), ['333']);
+
+  // Con "escribir solo"
+  call({ action: 'setConfig', name: 'STRAVA_SETTINGS', value: { auto: true } });
+  stravaFake.activities = [run, walk, gym];
+  props.STRAVA_EXPIRES_AT = '1';   // fuerza renovar el token
+  sync = call({ action: 'stravaSync' });
+  eq('escribe solo lo nuevo', sync.written.map(e => e.id).sort(), ['333', '444']);
+  eq('renovó el token', props.STRAVA_ACCESS_TOKEN, 'A2');
+  eq('caminata escrita en BASICO del 15', s2026s.data[8][4], '18:05 Caminar 6.86km (2:19)');
+  eq('no se repite', call({ action: 'stravaSync' }).written.length, 0);
+  props.STRAVA_DONE = '[]';
+  s2026s.data[7][3] = '11:40 Carrera base';
+  stravaFake.activities = [run];
+  sync = call({ action: 'stravaSync' });
+  eq('si ya registraste a esa hora, propone en vez de escribir', [sync.written.length, sync.pending.map(e => e.id)], [0, ['111']]);
+  eq('desconectar', call({ action: 'stravaDisconnect' }).strava.connected, false);
+  eq('el secreto nunca sale en las respuestas', JSON.stringify(call({ action: 'stravaStatus' })).includes('secreto-strava'), false);
+
+  // ── Descomponer celdas ──
+  eq('desayuno típico', parseMealCell('9:30 Vaso de leche, tostada de pan integral con tomate y queso de burgos. 1 vitamina D y 1 Natalbel'), {
+    combos: ['Vaso de leche, tostada de pan integral con tomate y queso de burgos'],
+    items: ['Vaso de leche', 'tostada de pan integral con tomate y queso de burgos'],
+    bebidas: [], suplementos: ['1 vitamina D', '1 Natalbel'], lugares: []
+  });
+  eq('lugar + bebida', parseMealCell('15:10 en la oficina, ensalada de garbanzos con queso feta. Agua'), {
+    combos: [], items: ['ensalada de garbanzos con queso feta'], bebidas: ['Agua'], suplementos: [], lugares: ['en la oficina']
+  });
+  eq('dos horas en una celda', parseMealCell('11:00 1 pera  12:30 1 yogurt natual y 1 pomelo').items, ['1 pera', '1 yogurt natual', '1 pomelo']);
+  eq('formato de la app', parseMealCell('21:30 en casa. Crema de calabacín, pan integral. Bebida: agua, cerveza 0. Suplementos: Natalbel'), {
+    combos: ['Crema de calabacín, pan integral'], items: ['Crema de calabacín', 'pan integral'],
+    bebidas: ['agua', 'cerveza 0'], suplementos: ['Natalbel'], lugares: ['en casa']
+  });
+  eq('sin comas (estilo 2026)', parseMealCell('9:30 Cafe con leche Pan integral con tomate y queso de burgos').items,
+    ['Cafe con leche', 'Pan integral con tomate y queso de burgos']);
+  eq('no corta nombres propios ni tras preposición', splitPieces('Coca Cola zero, jamón de York, pan con 2 lonchas'),
+    ['Coca Cola zero', 'jamón de York', 'pan con 2 lonchas']);
+  eq('corta antes de cantidades', splitPieces('Yodocefol 1 vitamina D'), ['Yodocefol', '1 vitamina D']);
+  eq('ignora notas en mayúsculas', parseMealCell('Fruta (LÁCTEO y FRUTA)').items, ['Fruta']);
+  eq('bebida + comida sin comas', parseMealCell('Cocacola patatas fritas con mejillones'),
+    { combos: [], items: ['patatas fritas con mejillones'], bebidas: ['Cocacola'], suplementos: [], lugares: [] });
+  eq('dos bebidas unidas', parseMealCell('Agua y vino con cocacola').bebidas, ['Agua', 'vino', 'cocacola']);
+  eq('bebida con apellido', parseMealCell('Coca Cola zero 1/2 pincho de tortilla').bebidas, ['Coca Cola zero']);
+  eq('cerveza 0.0', parseMealCell('Cerveza 0.0').bebidas, ['Cerveza 0.0']);
+  eq('suplemento mezclado', parseMealCell('Sobao Natalbel'), { combos: [], items: ['Sobao'], bebidas: [], suplementos: ['Natalbel'], lugares: [] });
+  eq('clave sin acentos ni "1 "', [itemKey('1 Plátano.'), itemKey('platano'), itemLabel('1 pera')], ['platano', 'platano', 'Pera']);
+
+  // ── Histórico real ──
+  const t0 = performance.now();
+  const h = call({ action: 'history' }).history;
+  const ms = Math.round(performance.now() - t0);
+  const top = (slot, cat, n = 6) => h[slot][cat].slice(0, n).map(r => r[0]);
+  results.push(`ℹ️ histórico en ${ms} ms, ${JSON.stringify(h).length} bytes`);
+  results.push(`ℹ️ DES items: ${top('DES', 'items', 10).join(' | ')}`);
+  results.push(`ℹ️ DES combos: ${top('DES', 'combos', 4).join(' | ')}`);
+  results.push(`ℹ️ DES bebidas/suplementos/lugares: ${top('DES', 'bebidas').join(', ')} / ${top('DES', 'suplementos').join(', ')} / ${top('DES', 'lugares').join(', ')}`);
+  results.push(`ℹ️ COM items: ${top('COM', 'items', 12).join(' | ')}`);
+  results.push(`ℹ️ COM combos: ${top('COM', 'combos', 4).join(' | ')}`);
+  results.push(`ℹ️ CEN bebidas: ${top('CEN', 'bebidas', 8).join(', ')}`);
+  results.push(`ℹ️ MER items: ${top('MER', 'items', 8).join(' | ')}`);
+  results.push(`ℹ️ DU items/bebidas: ${top('DU', 'items').join(' | ')} / ${top('DU', 'bebidas').join(', ')}`);
+  results.push(`ℹ️ lugares: ${top('ALL', 'lugares', 8).join(', ')}`);
+  eq('café con leche entre los 5 primeros del desayuno', top('DES', 'items', 5).includes('Cafe con leche'), true);
+  eq('Natalbel es suplemento, no comida', [top('DES', 'suplementos', 5).includes('Natalbel'), h.DES.items.some(r => /natalbel/i.test(r[0]))], [true, false]);
+  eq('uso reciente (30 días) en cada sugerencia', h.DES.items.every(r => r.length === 3 && typeof r[2] === 'number'), true);
+  eq('agua es bebida en la comida', top('COM', 'bebidas', 3).some(b => /^agua$/i.test(b)), true);
+
+  document.getElementById('out').textContent = results.join('\n');
+})().catch(e => { document.getElementById('out').textContent = 'ERROR ' + e.stack; });
+</script>

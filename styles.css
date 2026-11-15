@@ -285,3 +285,12 @@ body[data-view="config"] #prevDay, body[data-view="config"] #nextDay { visibilit
 #eatDone { margin-top: 16px; }
 .eat-done { margin: 4px 4px; font-size: 13px; color: var(--muted); }
 .tabbar button { font-size: 11px; }
+
+/* ── Strava ── */
+.strava-card { border-color: #fc4c02; }
+.strava-item { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; border-top: 1px solid var(--line); }
+.strava-item:first-child { border-top: 0; padding-top: 0; }
+.strava-line { margin: 0; font-weight: 600; }
+.strava-item .hint { margin: 0; }
+.strava-item .actions { margin-top: 4px; }
+code { font-size: 12px; background: var(--bg); padding: 1px 4px; border-radius: 4px; }

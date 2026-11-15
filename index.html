@@ -12,7 +12,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="styles.css?v=5">
+  <link rel="stylesheet" href="styles.css?v=6">
 </head>
 <body>
   <header class="topbar">
@@ -30,6 +30,10 @@
     <button class="today-link" id="goToday" hidden>Volver a hoy</button>
     <p class="menu-hint" id="menuHint" hidden></p>
     <button class="today-plan" id="todayPlan" hidden></button>
+    <section class="card strava-card" id="stravaCard" hidden>
+      <h2>🏃 Nuevo en Strava</h2>
+      <div id="stravaList"></div>
+    </section>
     <section>
       <h2>Actividad</h2>
       <div class="grid" data-group="act"></div>
@@ -103,6 +107,22 @@
         <p id="appVersion"></p>
         <p id="scriptVersion" class="hint"></p>
         <button type="button" class="ghost" id="reloadBtn">Buscar actualización</button>
+      </div>
+    </details>
+
+    <details class="card cfg" id="cfgStrava">
+      <summary>🏃 Strava</summary>
+      <div class="cfg-body">
+        <p id="stravaStatus">—</p>
+        <div id="stravaSetup" class="hint" hidden>
+          Falta crear tu app en Strava y poner sus claves en el script (<code>STRAVA_CLIENT_ID</code> y <code>STRAVA_CLIENT_SECRET</code>). Los pasos están en el README.
+        </div>
+        <label class="switch"><input type="checkbox" id="stravaAuto"> Escribir las actividades solas en el Sheet</label>
+        <p class="hint">Desactivado: la app te propone cada actividad y tú la revisas. Activado: se escribe sola; si ya habías registrado algo a esa hora, te la sigue preguntando.</p>
+        <div class="actions">
+          <button type="button" class="ghost" id="stravaDisconnectBtn" hidden>Desconectar</button>
+          <button type="button" class="primary" id="stravaConnectBtn">Conectar con Strava</button>
+        </div>
       </div>
     </details>
 
@@ -262,7 +282,7 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="plan.js?v=5"></script>
-  <script src="app.js?v=5"></script>
+  <script src="plan.js?v=6"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>
