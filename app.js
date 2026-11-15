@@ -1,7 +1,7 @@
 'use strict';
 
 // Cambia junto con ?v= en index.html y VERSION en sw.js.
-const APP_VERSION = 3;
+const APP_VERSION = 4;
 
 // Si algo falla, que se vea en pantalla en lugar de no hacer nada.
 window.addEventListener('error', e => toast(`Error: ${e.message}`));
@@ -111,6 +111,9 @@ const state = {
   queue: store.get('queue', []),        // [{id, op:'add'|'set', date, slot, line|value, at}]
   syncing: false,
   history: store.get('history', null),   // sugerencias del histórico, por franja
+  overrides: store.get('overrides', {}),  // correcciones de grupos del menú ideal
+  view: store.get('view', 'register'),
+  weekStart: null,
   lastError: ''
 };
 
@@ -198,10 +201,12 @@ async function flush() {
         const { results } = await api({ action: 'add', entries: [{ id: op.id, date: op.date, slot: op.slot, line: op.line }] });
         const r = results[0];
         if (!r.ok) throw new Error(r.error);
+      } else if (op.op === 'groups') {
+        await api({ action: 'setGroups', key: op.key, groups: op.groups });
       } else {
         await api({ action: 'set', date: op.date, slot: op.slot, value: op.value });
       }
-      touched.add(op.date);
+      if (op.date) touched.add(op.date);
       state.queue.shift();
       store.set('queue', state.queue);
     }
@@ -213,7 +218,7 @@ async function flush() {
   }
   for (const d of touched) await refreshDay(d);
   if (touched.size) loadHistory(true);
-  render();
+  if (state.view === 'plan') renderPlan(); else render();
 }
 
 // ───────────────────────── Pantalla principal ─────────────────────────
@@ -222,6 +227,7 @@ const WEEKDAYS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
 const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
 function render() {
+  if (state.view === 'plan') { renderPlan(); renderSync(); return; }
   const d = parseIso(state.date);
   const isToday = state.date === isoDate(new Date());
   $('#dateText').textContent = `${isToday ? 'Hoy, ' : ''}${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
@@ -232,6 +238,7 @@ function render() {
   const hint = view.menu && view.menu.training;
   $('#menuHint').hidden = !hint;
   $('#menuHint').textContent = hint ? `Plan del día: ${hint.replace(/\n/g, ' · ')}` : '';
+  renderTodayPlan();
 
   document.querySelectorAll('.grid').forEach(grid => {
     grid.innerHTML = '';
@@ -269,7 +276,8 @@ function renderSync() {
   $('#pendingList').innerHTML = '';
   state.queue.forEach(op => {
     const li = document.createElement('li');
-    li.textContent = `${op.date} · ${SLOT[op.slot].short || SLOT[op.slot].label}: ${op.op === 'add' ? op.line : '(celda editada)'}`;
+    li.textContent = op.op === 'groups' ? `Corrección: ${op.key}`
+      : `${op.date} · ${SLOT[op.slot].short || SLOT[op.slot].label}: ${op.op === 'add' ? op.line : '(celda editada)'}`;
     $('#pendingList').appendChild(li);
   });
 }
@@ -278,6 +286,7 @@ function setDate(iso) {
   state.date = iso;
   render();
   refreshDay(iso);
+  loadWeek(mondayOf(iso));
 }
 
 // ───────────────────────── Hoja de registro ─────────────────────────
@@ -309,7 +318,8 @@ function openEntry(key) {
   $('#lineText').placeholder = slot.kind === 'note' ? 'Escribe el comentario' : '';
 
   if (isActivity) buildActivityFields(slot.kind);
-  if (slot.kind === 'food') buildFoodBox(slot, view.menu);
+  form.planGroup = null;
+  if (slot.kind === 'food') { buildFoodBox(slot, view.menu); renderPlanBlock(); renderDetected(); }
   applyMode();
   updateLine();
   $('#entrySheet').showModal();
@@ -625,7 +635,7 @@ function updateLine() {
   const favText = slot.kind === 'food' ? clean($('#foodText').value) : '';
   $('#favBtn').hidden = slot.kind !== 'food';
   $('#favBtn').textContent = favText && favs.includes(favText) ? '★ Favorito' : '☆ Favorito';
-  if (slot.kind === 'food') refreshChips();
+  if (slot.kind === 'food') { refreshChips(); renderDetected(); renderPlanBlock(); }
 }
 
 function rememberRecent(slotKey, text) {
@@ -722,16 +732,364 @@ function saveSettings(e) {
   $('#settingsSheet').close();
   refreshDay(state.date);
   loadHistory(true);
+  loadWeek(mondayOf(state.date), true);
   flush();
+}
+
+// ───────────────────────── Menú ideal ─────────────────────────
+
+const WEEK_MAX_AGE = 10 * 60 * 1000;
+const groupLabel = g => `${GROUP[g].icon} ${GROUP[g].label}`;
+const todayIso = () => isoDate(new Date());
+
+/** Descarga 7 días + esquema + correcciones y los deja en caché. */
+async function loadWeek(start, force) {
+  if (!state.settings.url || !navigator.onLine) return;
+  const at = store.get('weekAt:' + start, 0);
+  if (!force && Date.now() - at < WEEK_MAX_AGE) return;
+  try {
+    const { week } = await api({ action: 'week', start });
+    week.days.forEach(d => {
+      if (d.error) return;
+      const prev = dayCache(d.date) || {};
+      saveDayCache(d.date, { ...prev, date: d.date, slots: d.slots });
+    });
+    if (week.scheme) store.set('scheme', week.scheme);
+    state.overrides = week.overrides || {};
+    store.set('overrides', state.overrides);
+    store.set('weekAt:' + start, Date.now());
+    if (state.view === 'plan') renderPlan();
+    else render();
+    if ($('#entrySheet').open && form.slot && form.slot.kind === 'food') { renderPlanBlock(); updateLine(); }
+  } catch (err) {
+    state.lastError = err.message;
+    renderSync();
+  }
+}
+
+function currentScheme() {
+  const raw = store.get('scheme', null);
+  return raw ? parseScheme(raw) : null;
+}
+
+/** Cumplimiento de la semana que empieza en `start`, con lo pendiente de enviar incluido. */
+function computeWeek(start) {
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const date = addDays(start, i);
+    days.push({ date, slots: viewDay(date).slots });
+  }
+  return evaluateWeek(currentScheme(), days, state.overrides, todayIso());
+}
+
+// ── Pantalla "Menú ideal" ──
+
+function weekLabel(start) {
+  const a = parseIso(start);
+  const b = parseIso(addDays(start, 6));
+  return a.getMonth() === b.getMonth()
+    ? `Semana ${a.getDate()}–${b.getDate()} ${MONTHS[b.getMonth()]}`
+    : `Semana ${a.getDate()} ${MONTHS[a.getMonth()]}–${b.getDate()} ${MONTHS[b.getMonth()]}`;
+}
+
+function renderPlan() {
+  const start = state.weekStart;
+  const isThisWeek = start === mondayOf(todayIso());
+  $('#dateText').textContent = weekLabel(start) + (isThisWeek ? ' ·' : '');
+  $('#goToday').hidden = true;
+
+  const scheme = currentScheme();
+  $('#planStatus').textContent = scheme ? '' : (state.settings.url ? 'Cargando el esquema del Sheet…' : 'Configura la conexión en Ajustes.');
+  if (!scheme) { $('#weekBars').innerHTML = ''; $('#dayCards').innerHTML = ''; $('#pendingCard').hidden = true; return; }
+  const week = computeWeek(start);
+
+  // Pendiente de días anteriores
+  const pend = Object.entries(week.pending);
+  $('#pendingCard').hidden = !pend.length || !isThisWeek;
+  $('#pendingChips').innerHTML = '';
+  pend.forEach(([g, n]) => $('#pendingChips').appendChild(makeChip(`${groupLabel(g)} ×${n}`, { cls: 'warn-chip', onClick: () => {} })));
+
+  // Barras por grupo: hecho (hasta hoy) sobre objetivo de la semana
+  const bars = $('#weekBars');
+  bars.innerHTML = '';
+  GROUPS.forEach(({ key }) => {
+    const target = week.target[key] || 0;
+    const actual = week.actual[key] || 0;
+    if (!target && !actual) return;
+    const toDate = week.targetToDate[key] || 0;
+    const ok = actual >= target;
+    const behind = (week.actualToDate[key] || 0) < toDate;
+    const row = document.createElement('div');
+    row.className = 'bar-row';
+    row.innerHTML = `<span class="bar-label"></span>
+      <span class="bar"><span class="bar-fill"></span><span class="bar-mark"></span></span>
+      <span class="bar-num"></span>`;
+    row.querySelector('.bar-label').textContent = groupLabel(key);
+    const pct = target ? Math.min(100, (actual / target) * 100) : 100;
+    const fill = row.querySelector('.bar-fill');
+    fill.style.width = pct + '%';
+    fill.className = 'bar-fill ' + (ok ? 'ok' : behind ? 'behind' : 'on-track');
+    // Marca: lo que debería llevar hasta hoy
+    const expectedNow = toDate + ((week.days.find(d => d.status === 'today') || { target: {} }).target[key] || 0);
+    const mark = row.querySelector('.bar-mark');
+    if (target && expectedNow && expectedNow < target) mark.style.left = (expectedNow / target) * 100 + '%';
+    else mark.hidden = true;
+    row.querySelector('.bar-num').textContent = `${actual}/${target}${ok ? ' ✓' : ''}`;
+    bars.appendChild(row);
+  });
+
+  // Tarjetas por día
+  const cards = $('#dayCards');
+  cards.innerHTML = '';
+  week.days.forEach(day => cards.appendChild(dayCard(day)));
+}
+
+function dayCard(day) {
+  const d = parseIso(day.date);
+  const card = document.createElement('details');
+  card.className = `card day-card ${day.status}`;
+  if (day.status === 'today') card.open = true;
+  const groups = GROUPS.map(g => g.key).filter(g => day.target[g]);
+  const met = groups.filter(g => (day.actual[g] || 0) >= day.target[g]).length;
+  const summary = document.createElement('summary');
+  const title = `${WEEKDAYS[d.getDay()]} ${d.getDate()}`;
+  const score = day.status === 'future' ? '' : `${met}/${groups.length}`;
+  summary.innerHTML = `<span class="day-title"></span><span class="day-train"></span><span class="day-score"></span>`;
+  summary.querySelector('.day-title').textContent = title + (day.status === 'today' ? ' · hoy' : '');
+  summary.querySelector('.day-train').textContent = (day.trained ? '🏃 ' : '') + (day.schemeTraining || '').split('\n')[0];
+  summary.querySelector('.day-score').textContent = score;
+  summary.querySelector('.day-score').className = 'day-score ' + (day.status === 'future' ? '' : met === groups.length ? 'ok' : 'miss');
+  card.appendChild(summary);
+
+  const chips = document.createElement('div');
+  chips.className = 'chips day-chips';
+  groups.forEach(g => {
+    const a = day.actual[g] || 0;
+    const t = day.target[g];
+    const cls = day.status === 'future' ? 'future' : a >= t ? 'ok' : 'miss';
+    const c = document.createElement('span');
+    c.className = 'gchip ' + cls;
+    c.textContent = `${GROUP[g].icon} ${a}/${t}`;
+    c.title = GROUP[g].label;
+    chips.appendChild(c);
+  });
+  card.appendChild(chips);
+
+  // Detalle por comida: qué tocaba y qué hubo
+  const detail = document.createElement('div');
+  detail.className = 'day-detail';
+  FOOD_SLOT_KEYS.forEach(slot => {
+    const exp = day.expectedSlots[slot];
+    const meal = day.meals[slot];
+    if (!exp && !meal) return;
+    const row = document.createElement('div');
+    row.className = 'meal-row';
+    const head = document.createElement('div');
+    head.className = 'meal-head';
+    head.textContent = SLOT[slot].label + (exp && exp.training ? ' 🏃' : '');
+    row.appendChild(head);
+    if (exp) {
+      const want = document.createElement('div');
+      want.className = 'chips';
+      exp.groups.forEach(({ g, note }) => {
+        const has = meal && meal.groups.includes(g);
+        const c = document.createElement('span');
+        c.className = 'gchip ' + (day.status === 'future' ? 'future' : has ? 'ok' : 'miss');
+        c.textContent = groupLabel(g) + (note ? ` (${note})` : '');
+        want.appendChild(c);
+      });
+      if (exp.libre) { const c = document.createElement('span'); c.className = 'gchip future'; c.textContent = '✨ a elegir'; want.appendChild(c); }
+      if (exp.during) { const c = document.createElement('span'); c.className = 'gchip ' + (meal ? 'ok' : day.status === 'future' ? 'future' : 'miss'); c.textContent = '💧 algo durante el entreno'; want.appendChild(c); }
+      row.appendChild(want);
+    }
+    if (meal) {
+      const ate = document.createElement('p');
+      ate.className = 'meal-text';
+      ate.textContent = viewDay(day.date).slots[slot].split('\n').join(' · ');
+      row.appendChild(ate);
+      const fix = document.createElement('button');
+      fix.type = 'button';
+      fix.className = 'link small';
+      fix.textContent = `Detectado: ${meal.groups.map(g => GROUP[g].icon).join(' ') || 'nada'} · Corregir`;
+      fix.addEventListener('click', () => openGroupsEditor(viewDay(day.date).slots[slot], () => renderPlan()));
+      row.appendChild(fix);
+    }
+    detail.appendChild(row);
+  });
+  const go = document.createElement('button');
+  go.type = 'button';
+  go.className = 'ghost small-btn';
+  go.textContent = 'Registrar este día';
+  go.addEventListener('click', () => { switchView('register'); setDate(day.date); });
+  detail.appendChild(go);
+  card.appendChild(detail);
+  return card;
+}
+
+function switchView(view) {
+  state.view = view;
+  store.set('view', view);
+  $('#main').hidden = view !== 'register';
+  $('#planView').hidden = view !== 'plan';
+  document.querySelectorAll('.tabbar button').forEach(b => b.classList.toggle('on', b.dataset.view === view));
+  window.scrollTo(0, 0);
+  if (view === 'plan') {
+    if (!state.weekStart) state.weekStart = mondayOf(state.date);
+    renderPlan();
+    loadWeek(state.weekStart);
+  } else {
+    render();
+  }
+}
+
+// ── En el registro: qué toca según el menú ideal ──
+
+/** Lo que falta hoy para esta franja (esquema + pendiente de la semana) y lo que ya cubre el texto. */
+function renderPlanBlock() {
+  const slot = form.slot;
+  const box = $('#planBlock');
+  if (!slot || slot.kind !== 'food' || !currentScheme()) { box.hidden = true; return; }
+  const week = computeWeek(mondayOf(state.date));
+  // Se calcula sin lo que estás escribiendo, y luego se marca lo que ya cubre.
+  const wanted = suggestGroups(week, state.date, slot.key);
+  box.hidden = !wanted.length;
+  if (!wanted.length) return;
+  const typed = new Set(classifyMeal(clean($('#foodText').value), state.overrides).groups);
+  const gbox = $('#planGroupChips');
+  gbox.innerHTML = '';
+  wanted.forEach(w => {
+    const label = groupLabel(w.g) + (w.note ? ` (${w.note})` : '') + (w.reason === 'pending' ? ` · pendiente ×${w.count}` : '');
+    const chip = makeChip(label, {
+      cls: 'gsel' + (w.reason === 'pending' ? ' warn-chip' : '') + (form.planGroup === w.g ? ' sel' : ''),
+      onClick: () => { form.planGroup = form.planGroup === w.g ? null : w.g; renderPlanBlock(); }
+    });
+    chip.classList.toggle('on', typed.has(w.g));
+    gbox.appendChild(chip);
+  });
+
+  // Ideas del histórico para los grupos que faltan (o el elegido)
+  const need = form.planGroup ? [form.planGroup] : wanted.map(w => w.g).filter(g => !typed.has(g));
+  const ideas = $('#planIdeaChips');
+  ideas.innerHTML = '';
+  if (!need.length) return;
+  const h = state.history || {};
+  const pool = [...((h[slot.key] || {}).items || []), ...((h.ALL || {}).items || [])].map(r => r[0]);
+  const seen = new Set();
+  const typedKeys = new Set(listOf($('#foodText').value).map(keyOf));
+  // Puntuación: lo pendiente de la semana vale el triple; cubrir varios grupos a la vez suma.
+  const weight = g => (wanted.find(w => w.g === g && w.reason === 'pending') ? 3 : 1);
+  const scored = [];
+  pool.forEach((t, rank) => {
+    const k = keyOf(t);
+    if (seen.has(k) || typedKeys.has(k)) return;
+    seen.add(k);
+    const g = classifyMeal(t, state.overrides).groups;
+    const score = need.filter(n => g.includes(n)).reduce((a, n) => a + weight(n), 0);
+    if (score) scored.push({ t, score, rank });
+  });
+  scored.sort((a, b) => b.score - a.score || a.rank - b.rank);
+  scored.slice(0, form.planGroup ? 12 : 8)
+    .forEach(({ t }) => ideas.appendChild(makeChip(t, { cls: 'idea', onClick: () => toggleInList($('#foodText'), t) })));
+}
+
+/** "Detectado: 🥦 Verdura · 🍞 CHO" debajo de lo que escribes. */
+function renderDetected() {
+  const text = clean($('#foodText').value);
+  const line = $('#detectedLine');
+  line.hidden = !text;
+  if (!text) return;
+  const g = classifyMeal(text, state.overrides).groups;
+  $('#detectedText').textContent = g.length ? `Detectado: ${g.map(groupLabel).join(' · ')}` : 'No reconozco ningún grupo.';
+}
+
+// ── Corregir grupos ──
+
+let groupsEdit = null;
+
+function openGroupsEditor(text, after) {
+  const pieces = classifyMeal(text, state.overrides).pieces;
+  if (!pieces.length) { toast('No hay nada que corregir'); return; }
+  groupsEdit = { pieces: pieces.map(p => ({ ...p, groups: [...p.groups], orig: [...p.groups] })), after };
+  const list = $('#groupsList');
+  list.innerHTML = '';
+  groupsEdit.pieces.forEach(p => {
+    const row = document.createElement('div');
+    row.className = 'gedit-row';
+    const t = document.createElement('div');
+    t.className = 'gedit-text';
+    t.textContent = p.text + (p.corrected ? ' ✎' : '');
+    row.appendChild(t);
+    const chips = document.createElement('div');
+    chips.className = 'chips';
+    GROUPS.forEach(({ key }) => {
+      chips.appendChild(makeChip(groupLabel(key), {
+        on: p.groups.includes(key),
+        cls: 'small',
+        onClick: e => {
+          const i = p.groups.indexOf(key);
+          if (i >= 0) p.groups.splice(i, 1); else p.groups.push(key);
+          e.currentTarget.classList.toggle('on', i < 0);
+        }
+      }));
+    });
+    row.appendChild(chips);
+    list.appendChild(row);
+  });
+  $('#groupsSheet').showModal();
+}
+
+function saveGroups(e) {
+  e.preventDefault();
+  const changed = groupsEdit.pieces.filter(p => [...p.groups].sort().join() !== [...p.orig].sort().join());
+  changed.forEach(p => {
+    state.overrides[p.key] = p.groups;
+    state.queue.push({ id: uid(), at: Date.now(), op: 'groups', key: p.key, groups: p.groups });
+  });
+  store.set('overrides', state.overrides);
+  store.set('queue', state.queue);
+  $('#groupsSheet').close();
+  if (changed.length) toast('Corregido ✓');
+  if (groupsEdit.after) groupsEdit.after();
+  flush();
+}
+
+/** Resumen de hoy en la pantalla de registro: lo que aún falta. */
+function renderTodayPlan() {
+  const btn = $('#todayPlan');
+  if (!currentScheme()) { btn.hidden = true; return; }
+  const week = computeWeek(mondayOf(state.date));
+  const day = week.days.find(d => d.date === state.date);
+  if (!day || day.status === 'future') { btn.hidden = true; return; }
+  const missing = GROUPS.map(g => g.key).filter(g => (day.target[g] || 0) > (day.actual[g] || 0));
+  const pend = state.date === todayIso() ? Object.keys(week.pending).filter(g => !missing.includes(g)) : [];
+  btn.hidden = false;
+  if (!missing.length && !pend.length) { btn.textContent = '📋 Menú ideal de hoy cumplido ✓'; btn.className = 'today-plan ok'; return; }
+  const parts = missing.map(g => `${GROUP[g].icon}${day.target[g] - (day.actual[g] || 0) > 1 ? '×' + (day.target[g] - (day.actual[g] || 0)) : ''}`);
+  btn.textContent = `📋 Falta hoy: ${parts.join(' ')}` + (pend.length ? ` · pendiente: ${pend.map(g => GROUP[g].icon).join(' ')}` : '');
+  btn.className = 'today-plan';
 }
 
 // ───────────────────────── Arranque ─────────────────────────
 
 function init() {
-  $('#prevDay').addEventListener('click', () => setDate(addDays(state.date, -1)));
-  $('#nextDay').addEventListener('click', () => setDate(addDays(state.date, 1)));
+  const step = n => {
+    if (state.view === 'plan') { state.weekStart = addDays(state.weekStart, 7 * n); renderPlan(); loadWeek(state.weekStart); }
+    else setDate(addDays(state.date, n));
+  };
+  $('#prevDay').addEventListener('click', () => step(-1));
+  $('#nextDay').addEventListener('click', () => step(1));
+  document.querySelectorAll('.tabbar button').forEach(b => b.addEventListener('click', () => {
+    if (b.dataset.view === 'plan') state.weekStart = mondayOf(state.date);
+    switchView(b.dataset.view);
+  }));
+  $('#fixGroupsBtn').addEventListener('click', () => openGroupsEditor(clean($('#foodText').value), () => { renderDetected(); renderPlanBlock(); }));
+  $('#groupsForm').addEventListener('submit', saveGroups);
   $('#goToday').addEventListener('click', () => setDate(isoDate(new Date())));
-  $('#dateInput').addEventListener('change', e => e.target.value && setDate(e.target.value));
+  $('#dateInput').addEventListener('change', e => {
+    if (!e.target.value) return;
+    if (state.view === 'plan') { state.weekStart = mondayOf(e.target.value); state.date = e.target.value; renderPlan(); loadWeek(state.weekStart); }
+    else setDate(e.target.value);
+  });
   $('#dateLabel').addEventListener('click', () => {
     const input = $('#dateInput');
     if (input.showPicker) { try { input.showPicker(); return; } catch { /* iOS */ } }
@@ -811,13 +1169,16 @@ function init() {
     render();
     flush();
     refreshDay(state.date);
+    loadWeek(mondayOf(state.date));
   });
 
   store.set('lastOpen', state.date);
-  render();
+  state.weekStart = mondayOf(state.date);
+  switchView(state.view);
   if (!state.settings.url) openSettings();
   refreshDay(state.date);
   loadHistory();
+  loadWeek(state.weekStart);
   flush();
 
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});

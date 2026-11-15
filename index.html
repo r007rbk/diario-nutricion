@@ -12,7 +12,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="styles.css?v=3">
+  <link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
   <header class="topbar">
@@ -29,6 +29,7 @@
   <main id="main">
     <button class="today-link" id="goToday" hidden>Volver a hoy</button>
     <p class="menu-hint" id="menuHint" hidden></p>
+    <button class="today-plan" id="todayPlan" hidden></button>
     <section>
       <h2>Actividad</h2>
       <div class="grid" data-group="act"></div>
@@ -46,6 +47,29 @@
       <div class="grid" data-group="other"></div>
     </section>
   </main>
+
+  <!-- Menú ideal: cumplimiento semanal -->
+  <main id="planView" hidden>
+    <p class="hint plan-loading" id="planStatus"></p>
+    <section class="card" id="pendingCard" hidden>
+      <h2>Pendiente de días anteriores</h2>
+      <div class="chips" id="pendingChips"></div>
+      <p class="hint">Te lo sugeriré en las próximas comidas y cenas de esta semana.</p>
+    </section>
+    <section class="card">
+      <h2>Semana</h2>
+      <div id="weekBars"></div>
+    </section>
+    <section>
+      <h2>Día a día</h2>
+      <div id="dayCards"></div>
+    </section>
+  </main>
+
+  <nav class="tabbar" aria-label="Apartados">
+    <button type="button" data-view="register" class="on"><span>✏️</span>Registrar</button>
+    <button type="button" data-view="plan"><span>📋</span>Menú ideal</button>
+  </nav>
 
   <!-- Hoja de registro -->
   <dialog id="entrySheet" class="sheet">
@@ -94,9 +118,16 @@
           <span class="block-label">Comida</span>
           <div class="chips" id="itemChips"></div>
         </div>
+        <div class="plan-block" id="planBlock" hidden>
+          <span class="block-label">📋 Según tu menú ideal</span>
+          <div class="chips" id="planGroupChips"></div>
+          <div class="chips" id="planIdeaChips"></div>
+        </div>
+
         <label class="field">Qué has comido
           <textarea id="foodText" rows="2" placeholder="Toca arriba o escribe: café con leche, pan integral con tomate…"></textarea>
         </label>
+        <p class="detected" id="detectedLine" hidden><span id="detectedText"></span> <button type="button" class="link" id="fixGroupsBtn">Corregir</button></p>
 
         <div class="block">
           <span class="block-label">💧 Bebida</span>
@@ -141,6 +172,21 @@
     </form>
   </dialog>
 
+  <!-- Corregir grupos -->
+  <dialog id="groupsSheet" class="sheet">
+    <form method="dialog" id="groupsForm">
+      <header class="sheet-head">
+        <h3>¿Qué grupos tiene?</h3>
+        <button type="button" class="icon-btn" data-close aria-label="Cerrar">✕</button>
+      </header>
+      <p class="hint">Toca para marcar o desmarcar. Se recordará para la próxima vez que lo escribas igual.</p>
+      <div id="groupsList"></div>
+      <div class="actions">
+        <button type="submit" class="primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Ajustes -->
   <dialog id="settingsSheet" class="sheet">
     <form method="dialog" id="settingsForm">
@@ -170,6 +216,7 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="app.js?v=3"></script>
+  <script src="plan.js?v=4"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>
