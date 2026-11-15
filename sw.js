@@ -1,7 +1,7 @@
 // Guarda la app en el móvil para que abra sin conexión.
 // Sube VERSION cada vez que cambies un archivo de la app.
-const VERSION = 'diario-v2';
-const FILES = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest',
+const VERSION = 'diario-v3';
+const FILES = ['./', 'index.html', 'styles.css?v=3', 'app.js?v=3', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/apple-touch-icon.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -20,7 +20,8 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
   // Red primero (para recibir actualizaciones), caché si no hay conexión.
   e.respondWith(
-    fetch(e.request)
+    // no-cache: pregunta siempre a GitHub si hay versión nueva (evita mezclar archivos viejos y nuevos).
+    fetch(e.request, { cache: 'no-cache' })
       .then(res => {
         const copy = res.clone();
         caches.open(VERSION).then(c => c.put(e.request, copy));

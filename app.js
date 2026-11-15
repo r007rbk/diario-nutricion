@@ -1,5 +1,12 @@
 'use strict';
 
+// Cambia junto con ?v= en index.html y VERSION en sw.js.
+const APP_VERSION = 3;
+
+// Si algo falla, que se vea en pantalla en lugar de no hacer nada.
+window.addEventListener('error', e => toast(`Error: ${e.message}`));
+window.addEventListener('unhandledrejection', e => toast(`Error: ${e.reason && e.reason.message || e.reason}`));
+
 // ───────────────────────── Definiciones ─────────────────────────
 
 const SLOTS = [
@@ -684,6 +691,7 @@ function openSettings() {
   $('#urlInput').value = state.settings.url;
   $('#tokenInput').value = state.settings.token;
   $('#settingsStatus').textContent = state.lastError ? `Último error: ${state.lastError}` : '';
+  $('#appVersion').textContent = `Versión de la app: ${APP_VERSION}`;
   renderSync();
   $('#settingsSheet').showModal();
 }
