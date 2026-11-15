@@ -69,6 +69,28 @@ const DICT_EXCLUDE = {
   PESCADO: []
 };
 
+// ── Diccionario editable: base + palabras añadidas − palabras quitadas (Ajustes → Diccionario) ──
+let customDict = { add: {}, remove: {} };
+let effectiveDict = DICTIONARY;
+
+/** custom = { add: { VERDURA: ['kale'] }, remove: { LACTEO: ['cortado'] } } */
+function setCustomDictionary(custom) {
+  customDict = { add: {}, remove: {}, ...(custom || {}) };
+  effectiveDict = {};
+  for (const g of Object.keys(DICTIONARY)) {
+    const removed = new Set((customDict.remove[g] || []).map(normText));
+    const base = DICTIONARY[g].filter(w => !removed.has(normText(w)));
+    const added = (customDict.add[g] || []).filter(w => !base.some(b => normText(b) === normText(w)));
+    effectiveDict[g] = [...base, ...added];
+  }
+}
+
+/** Palabras de un grupo para mostrarlas: [{word, custom}] */
+function dictionaryWords(g) {
+  const added = new Set((customDict.add[g] || []).map(w => normText(w)));
+  return (effectiveDict[g] || []).map(w => ({ word: w.trim(), custom: added.has(normText(w)) }));
+}
+
 const normText = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
   .replace(/\s+/g, ' ').trim();
 const pieceKey = s => normText(s).replace(/[.,;:]+$/, '').replace(/^(?:(?:y|e|con|1|un|una)\s+)+(?=\D)/, '').trim();
@@ -92,10 +114,10 @@ function wordMatch(text, word) {
 function classifyByDictionary(text) {
   let t = ' ' + normText(text) + ' ';
   const found = new Set();
-  for (const g of Object.keys(DICTIONARY)) {
+  for (const g of Object.keys(effectiveDict)) {
     let tt = t;
     for (const ex of DICT_EXCLUDE[g] || []) tt = tt.split(normText(ex)).join(' ');
-    if (DICTIONARY[g].some(w => wordMatch(tt.trim(), w))) found.add(g);
+    if (effectiveDict[g].some(w => wordMatch(tt.trim(), w))) found.add(g);
   }
   // "pan con tomate" no cuenta como ración de verdura; el resto de tomate sí.
   return [...found];
@@ -289,6 +311,74 @@ function suggestGroups(week, date, slot) {
   return out;
 }
 
+// ───────────────────────── ¿Qué como? ─────────────────────────
+
+/**
+ * Propone comidas completas con platos de tu histórico.
+ * needs: [{g, weight}] (lo pendiente de la semana pesa más)
+ * candidates: [{text, groups, combo}] en orden de preferencia (lo que más comes primero)
+ * Cada propuesta empieza por un plato distinto y se completa con lo que cubra lo que falta.
+ * Devuelve [{parts: [texto], covers: [grupo], missing: [grupo]}]
+ */
+const PROTEINS = ['PESCADO', 'CARNE', 'HUEVO', 'LEGUMBRE'];
+
+function proposeMeals(needs, candidates, count = 5, maxParts = 4) {
+  const W = Object.fromEntries(needs.map(n => [n.g, n.weight || 1]));
+  // Una comida lleva un solo plato de proteína: cuenta solo la que más pesa de las que trae.
+  const gain = (groups, covered) => {
+    const hasProtein = [...covered].some(g => PROTEINS.includes(g));
+    let protein = 0;
+    let rest = 0;
+    groups.forEach(g => {
+      if (!W[g] || covered.has(g)) return;
+      if (PROTEINS.includes(g)) protein = Math.max(protein, W[g]);
+      else rest += W[g];
+    });
+    return rest + (hasProtein ? 0 : protein);
+  };
+  const proteinsOf = groups => groups.filter(g => PROTEINS.includes(g));
+  const extra = groups => groups.filter(g => !W[g]).length;   // grupos que no tocan
+  const cands = candidates.map((c, i) => ({ ...c, i }));
+  const proposals = [];
+  const usedFirst = new Set();
+  const seenSets = new Set();
+  for (let v = 0; v < count * 3 && proposals.length < count; v++) {
+    const first = cands
+      .filter(c => !usedFirst.has(c.text))
+      .map(c => ({ c, s: gain(c.groups, new Set()) + (c.combo ? 0.5 : 0) - 0.15 * extra(c.groups) - c.i * 0.002 }))
+      .filter(x => x.s >= 0.9)
+      .sort((a, b) => b.s - a.s)[0];
+    if (!first) break;
+    usedFirst.add(first.c.text);
+    const parts = [first.c];
+    const covered = new Set(first.c.groups.filter(g => W[g]));
+    while (parts.length < maxParts) {
+      const hasProtein = parts.some(p => proteinsOf(p.groups).length);
+      const next = cands
+        .filter(c => !c.combo && !parts.includes(c) && !(hasProtein && proteinsOf(c.groups).length))
+        .map(c => ({ c, s: gain(c.groups, covered) - 0.15 * extra(c.groups) - c.i * 0.002 }))
+        .filter(x => x.s >= 0.9)
+        .sort((a, b) => b.s - a.s)[0];
+      if (!next) break;
+      parts.push(next.c);
+      next.c.groups.forEach(g => { if (W[g]) covered.add(g); });
+    }
+    const sig = parts.map(p => p.text).sort().join('|');
+    if (seenSets.has(sig)) continue;
+    seenSets.add(sig);
+    // Las proteínas que no caben en esta comida no faltan: quedan para otra (later).
+    const gotProtein = [...covered].some(g => PROTEINS.includes(g));
+    const notCovered = needs.map(n => n.g).filter(g => !covered.has(g));
+    proposals.push({
+      parts: parts.map(p => p.text),
+      covers: [...covered],
+      later: gotProtein ? notCovered.filter(g => PROTEINS.includes(g)) : [],
+      missing: notCovered.filter(g => !(gotProtein && PROTEINS.includes(g)))
+    });
+  }
+  return proposals;
+}
+
 if (typeof module !== 'undefined') {
-  module.exports = { GROUPS, WEEKLY_GROUPS, classifyMeal, classifyByDictionary, parseScheme, evaluateDay, evaluateWeek, suggestGroups, mondayOf, pieceKey };
+  module.exports = { GROUPS, WEEKLY_GROUPS, proposeMeals, setCustomDictionary, dictionaryWords, classifyMeal, classifyByDictionary, parseScheme, evaluateDay, evaluateWeek, suggestGroups, mondayOf, pieceKey };
 }

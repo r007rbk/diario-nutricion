@@ -1,7 +1,7 @@
 'use strict';
 
 // Cambia junto con ?v= en index.html y VERSION en sw.js.
-const APP_VERSION = 4;
+const APP_VERSION = 5;
 
 // Si algo falla, que se vea en pantalla en lugar de no hacer nada.
 window.addEventListener('error', e => toast(`Error: ${e.message}`));
@@ -112,6 +112,9 @@ const state = {
   syncing: false,
   history: store.get('history', null),   // sugerencias del histórico, por franja
   overrides: store.get('overrides', {}),  // correcciones de grupos del menú ideal
+  config: store.get('config', null),      // listas de botones y diccionario (guardado en el script)
+  configLoaded: !!store.get('config', null),
+  scriptVersion: null,
   view: store.get('view', 'register'),
   weekStart: null,
   lastError: ''
@@ -164,6 +167,7 @@ async function loadHistory(force) {
     store.set('history', history);
     store.set('historyAt', Date.now());
     if ($('#entrySheet').open && form.slot && form.slot.kind === 'food') renderFoodSuggestions();
+    if (state.view === 'eat') renderEat();
   } catch (err) {
     state.lastError = err.message;
     renderSync();
@@ -201,6 +205,8 @@ async function flush() {
         const { results } = await api({ action: 'add', entries: [{ id: op.id, date: op.date, slot: op.slot, line: op.line }] });
         const r = results[0];
         if (!r.ok) throw new Error(r.error);
+      } else if (op.op === 'config') {
+        await api({ action: 'setConfig', name: op.name, value: op.value });
       } else if (op.op === 'groups') {
         await api({ action: 'setGroups', key: op.key, groups: op.groups });
       } else {
@@ -219,6 +225,7 @@ async function flush() {
   for (const d of touched) await refreshDay(d);
   if (touched.size) loadHistory(true);
   if (state.view === 'plan') renderPlan(); else render();
+  if (state.view === 'config') renderConfig();
 }
 
 // ───────────────────────── Pantalla principal ─────────────────────────
@@ -228,6 +235,8 @@ const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', '
 
 function render() {
   if (state.view === 'plan') { renderPlan(); renderSync(); return; }
+  if (state.view === 'config') { renderSync(); return; }
+  if (state.view === 'eat') { renderEat(); renderSync(); return; }
   const d = parseIso(state.date);
   const isToday = state.date === isoDate(new Date());
   $('#dateText').textContent = `${isToday ? 'Hoy, ' : ''}${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
@@ -276,7 +285,7 @@ function renderSync() {
   $('#pendingList').innerHTML = '';
   state.queue.forEach(op => {
     const li = document.createElement('li');
-    li.textContent = op.op === 'groups' ? `Corrección: ${op.key}`
+    li.textContent = op.op === 'groups' ? `Corrección: ${op.key}` : op.op === 'config' ? `Ajuste: ${op.name}`
       : `${op.date} · ${SLOT[op.slot].short || SLOT[op.slot].label}: ${op.op === 'add' ? op.line : '(celda editada)'}`;
     $('#pendingList').appendChild(li);
   });
@@ -468,11 +477,8 @@ function buildFoodBox(slot, menu) {
   // Lugar (una opción)
   const places = $('#placeChips');
   places.querySelectorAll('.chip').forEach(c => c.remove());
-  const placeList = suggestions(slot.key, 'lugares', 3).slice(0, 4);
-  ['En casa', 'En la oficina', 'En restaurante'].forEach(p => {
-    if (!placeList.some(x => keyOf(x) === keyOf(p))) placeList.push(p);
-  });
-  placeList.slice(0, 5).reverse().forEach(p => {
+  const placeList = presetItems('LUGARES');
+  placeList.slice().reverse().forEach(p => {
     places.prepend(makeChip(p, {
       onClick: () => {
         form.place = keyOf(form.place) === keyOf(p) ? '' : p;
@@ -484,8 +490,8 @@ function buildFoodBox(slot, menu) {
   });
 
   renderFoodSuggestions();
-  renderListChips('#drinkChips', '#drinkText', suggestions(slot.key, 'bebidas').slice(0, 8), ['Agua'], true);
-  renderListChips('#suppChips', '#suppText', suggestions(slot.key, 'suplementos', 3).slice(0, 6), []);
+  renderListChips('#drinkChips', '#drinkText', presetItems('BEBIDAS'), [], true);
+  renderListChips('#suppChips', '#suppText', presetItems('SUPLEMENTOS'), []);
 
   $('#harvardOn').checked = !!slot.harvard;
   const items = $('#harvardItems');
@@ -533,7 +539,7 @@ function renderFoodSuggestions() {
     const s = new Set();
     items = pool.filter(t => { const k = keyOf(t); if (s.has(k) || !k.includes(q)) return false; s.add(k); return true; }).slice(0, 30);
   } else {
-    items = suggestions(slot.key, 'items');
+    items = presetItems(slot.key);
   }
 
   const comboBox = $('#comboChips');
@@ -698,12 +704,8 @@ function saveEditCell(e) {
 // ───────────────────────── Ajustes ─────────────────────────
 
 function openSettings() {
-  $('#urlInput').value = state.settings.url;
-  $('#tokenInput').value = state.settings.token;
-  $('#settingsStatus').textContent = state.lastError ? `Último error: ${state.lastError}` : '';
-  $('#appVersion').textContent = `Versión de la app: ${APP_VERSION}`;
-  renderSync();
-  $('#settingsSheet').showModal();
+  switchView('config');
+  $('#cfgConnection').open = true;
 }
 
 function readSettingsForm() {
@@ -715,8 +717,9 @@ async function testConnection() {
   state.settings = readSettingsForm();
   $('#settingsStatus').textContent = 'Probando…';
   try {
-    const { sheets } = await api({ action: 'ping' });
+    const { sheets, version } = await api({ action: 'ping' });
     $('#settingsStatus').textContent = `Conectado ✓ Temporadas: ${sheets.map(s => `${s.name} (desde ${s.start})`).join(', ')}`;
+    if (version) { state.scriptVersion = version; $('#scriptVersion').textContent = `Script de Google: versión ${version}`; }
   } catch (err) {
     $('#settingsStatus').textContent = `Error: ${err.message}`;
   } finally {
@@ -729,8 +732,9 @@ function saveSettings(e) {
   state.settings = readSettingsForm();
   store.set('settings', state.settings);
   state.lastError = '';
-  $('#settingsSheet').close();
+  toast('Guardado ✓');
   refreshDay(state.date);
+  loadConfig();
   loadHistory(true);
   loadWeek(mondayOf(state.date), true);
   flush();
@@ -931,12 +935,21 @@ function switchView(view) {
   store.set('view', view);
   $('#main').hidden = view !== 'register';
   $('#planView').hidden = view !== 'plan';
+  $('#configView').hidden = view !== 'config';
+  $('#eatView').hidden = view !== 'eat';
+  document.body.dataset.view = view;
   document.querySelectorAll('.tabbar button').forEach(b => b.classList.toggle('on', b.dataset.view === view));
   window.scrollTo(0, 0);
   if (view === 'plan') {
     if (!state.weekStart) state.weekStart = mondayOf(state.date);
     renderPlan();
     loadWeek(state.weekStart);
+  } else if (view === 'eat') {
+    renderEat();
+    loadWeek(mondayOf(state.date));
+  } else if (view === 'config') {
+    renderConfig();
+    loadConfig();
   } else {
     render();
   }
@@ -1069,6 +1082,448 @@ function renderTodayPlan() {
   btn.className = 'today-plan';
 }
 
+// ───────────────────────── Configuración guardada en el script ─────────────────────────
+
+/** Descarga listas, diccionario y correcciones. */
+async function loadConfig() {
+  if (!state.settings.url || !navigator.onLine) return;
+  try {
+    const res = await api({ action: 'config' });
+    // Lo que aún está en la cola manda sobre lo del servidor.
+    const queued = Object.fromEntries(state.queue.filter(op => op.op === 'config').map(op => [op.name, op.value]));
+    state.config = { ...res.config, ...queued };
+    Object.keys(queued).forEach(k => { if (queued[k] === null) delete state.config[k]; });
+    state.overrides = { ...res.overrides };
+    state.queue.filter(op => op.op === 'groups').forEach(op => {
+      if (op.groups === null) delete state.overrides[op.key]; else state.overrides[op.key] = op.groups;
+    });
+    state.scriptVersion = res.version;
+    state.configLoaded = true;
+    store.set('config', state.config);
+    store.set('overrides', state.overrides);
+    setCustomDictionary(state.config.DICT_CUSTOM);
+    if (state.view === 'config') renderConfig(); else render();
+  } catch (err) {
+    state.lastError = err.message;
+    renderSync();
+  }
+}
+
+/** Guarda un ajuste (en el móvil al momento; en el script en cuanto haya conexión). */
+function saveConfig(name, value) {
+  state.config = state.config || {};
+  if (value === null) delete state.config[name]; else state.config[name] = value;
+  store.set('config', state.config);
+  state.queue = state.queue.filter(op => !(op.op === 'config' && op.name === name));
+  state.queue.push({ id: uid(), at: Date.now(), op: 'config', name, value });
+  store.set('queue', state.queue);
+  clearTimeout(saveConfig.timer);
+  saveConfig.timer = setTimeout(flush, 800);   // agrupa varios cambios seguidos
+  renderSync();
+}
+
+// ── Listas de botones (presets) ──
+
+const AUTO_ADD_MIN = 3;   // veces en los últimos 30 días para añadirse sola
+const PRESET_LISTS = [
+  ...FOOD_SLOT_KEYS.map(k => ({ name: k, label: SLOT[k].short || SLOT[k].label, source: h => (h[k] || {}).items, seed: 16 })),
+  { name: 'BEBIDAS', label: '💧 Bebida', source: h => (h.ALL || {}).bebidas, seed: 8, defaults: ['Agua'] },
+  { name: 'SUPLEMENTOS', label: '💊 Suplementos', source: h => (h.ALL || {}).suplementos, seed: 6 },
+  { name: 'LUGARES', label: '📍 Lugares', source: h => (h.ALL || {}).lugares, seed: 5, defaults: ['En casa', 'En la oficina', 'En restaurante'] }
+];
+const PRESET = Object.fromEntries(PRESET_LISTS.map(p => [p.name, p]));
+
+/**
+ * Botones de una lista, ordenados por uso. La primera vez se rellena con lo más usado del
+ * histórico; después se añade solo lo que registres AUTO_ADD_MIN veces en 30 días
+ * (salvo que lo hayas quitado).
+ */
+function presetItems(name) {
+  const def = PRESET[name];
+  const rows = (state.history && def.source(state.history)) || [];
+  const cfgName = 'PRESETS_' + name;
+  let cfg = state.config && state.config[cfgName];
+  const dedupe = list => { const seen = new Set(); return list.filter(t => { const k = keyOf(t); if (!k || seen.has(k)) return false; seen.add(k); return true; }); };
+  if (!cfg) {
+    const seed = dedupe([...(def.defaults || []), ...rows.slice(0, def.seed).map(r => r[0])]);
+    // Solo se guarda cuando ya sabemos lo que hay en el script (si no, se pisaría).
+    if (!state.configLoaded || !state.history) return seed;
+    cfg = { items: seed, hidden: [], auto: [] };
+    saveConfig(cfgName, cfg);
+  }
+  const keys = new Set(cfg.items.map(keyOf));
+  const hidden = new Set(cfg.hidden || []);
+  const added = rows.filter(r => (r[2] || 0) >= AUTO_ADD_MIN && !keys.has(keyOf(r[0])) && !hidden.has(keyOf(r[0])));
+  if (added.length && state.configLoaded) {
+    cfg = { ...cfg, items: [...cfg.items, ...added.map(r => r[0])], auto: [...(cfg.auto || []), ...added.map(r => keyOf(r[0]))] };
+    saveConfig(cfgName, cfg);
+  }
+  const rank = new Map(rows.map((r, i) => [keyOf(r[0]), i]));
+  return cfg.items
+    .map((t, i) => ({ t, r: rank.has(keyOf(t)) ? rank.get(keyOf(t)) : 1000 + i }))
+    .sort((a, b) => a.r - b.r)
+    .map(x => x.t);
+}
+
+function presetConfig(name) {
+  presetItems(name);   // asegura que exista
+  const c = state.config && state.config['PRESETS_' + name];
+  return c ? { items: [...c.items], hidden: [...(c.hidden || [])], auto: [...(c.auto || [])] } : null;
+}
+
+function editPreset(name, fn) {
+  const cfg = presetConfig(name);
+  if (!cfg) { toast('Conéctate primero para cargar tus listas'); return; }
+  fn(cfg);
+  saveConfig('PRESETS_' + name, cfg);
+  renderPresetEditor();
+}
+
+// ───────────────────────── Pantalla de Ajustes ─────────────────────────
+
+function renderConfig() {
+  $('#dateText').textContent = 'Ajustes';
+  $('#urlInput').value = state.settings.url;
+  $('#tokenInput').value = state.settings.token;
+  $('#settingsStatus').textContent = state.lastError ? `Último error: ${state.lastError}` : '';
+  $('#appVersion').textContent = `App: versión ${APP_VERSION}`;
+  $('#scriptVersion').textContent = state.scriptVersion
+    ? `Script de Google: versión ${state.scriptVersion}${state.scriptVersion < APP_VERSION ? ' ⚠︎ actualízalo (Implementar → Nueva versión)' : ''}`
+    : 'Script de Google: sin datos (conéctate para comprobarlo)';
+  renderSync();
+  renderPresetEditor();
+  renderDictEditor();
+}
+
+function renderPresetEditor() {
+  const name = state.presetTab || 'DES';
+  const tabs = $('#presetTabs');
+  tabs.innerHTML = '';
+  PRESET_LISTS.forEach(p => tabs.appendChild(makeChip(p.label, {
+    on: p.name === name, cls: 'small',
+    onClick: () => { state.presetTab = p.name; renderPresetEditor(); }
+  })));
+  const cfg = presetConfig(name);
+  const list = $('#presetList');
+  list.innerHTML = '';
+  const items = cfg ? presetItems(name) : presetItems(name);
+  const auto = new Set(cfg ? cfg.auto : []);
+  items.forEach(t => {
+    const li = document.createElement('li');
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = t;
+    input.setAttribute('aria-label', 'Editar');
+    input.addEventListener('change', () => {
+      const v = input.value.trim();
+      if (!v || v === t) { input.value = t; return; }
+      editPreset(name, c => {
+        c.items = c.items.map(x => (x === t ? v : x));
+        if (keyOf(v) !== keyOf(t) && !c.hidden.includes(keyOf(t))) c.hidden.push(keyOf(t));   // que no vuelva el nombre viejo
+        c.hidden = c.hidden.filter(h => h !== keyOf(v));
+      });
+    });
+    li.appendChild(input);
+    if (auto.has(keyOf(t))) { const b = document.createElement('span'); b.className = 'badge'; b.textContent = 'auto'; b.title = 'Añadido solo por uso reciente'; li.appendChild(b); }
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'icon-btn small-x';
+    del.textContent = '✕';
+    del.setAttribute('aria-label', `Quitar ${t}`);
+    del.addEventListener('click', () => editPreset(name, c => {
+      c.items = c.items.filter(x => x !== t);
+      if (!c.hidden.includes(keyOf(t))) c.hidden.push(keyOf(t));
+    }));
+    li.appendChild(del);
+    list.appendChild(li);
+  });
+  if (!items.length) { const li = document.createElement('li'); li.className = 'hint'; li.textContent = 'Vacía. Añade algo abajo.'; list.appendChild(li); }
+
+  const hidden = cfg ? cfg.hidden : [];
+  $('#presetHiddenCount').textContent = hidden.length;
+  $('#presetHiddenBox').hidden = !hidden.length;
+  const hbox = $('#presetHidden');
+  hbox.innerHTML = '';
+  hidden.forEach(k => hbox.appendChild(makeChip(`↺ ${k}`, {
+    cls: 'small', title: 'Volver a permitir',
+    onClick: () => editPreset(name, c => { c.hidden = c.hidden.filter(h => h !== k); })
+  })));
+}
+
+function addPreset(e) {
+  e.preventDefault();
+  const v = $('#presetAddInput').value.trim();
+  if (!v) return;
+  const name = state.presetTab || 'DES';
+  editPreset(name, c => {
+    if (!c.items.some(x => keyOf(x) === keyOf(v))) c.items.unshift(v);
+    c.hidden = c.hidden.filter(h => h !== keyOf(v));
+  });
+  $('#presetAddInput').value = '';
+}
+
+function dictCustom() {
+  const c = (state.config && state.config.DICT_CUSTOM) || {};
+  return { add: { ...(c.add || {}) }, remove: { ...(c.remove || {}) } };
+}
+
+function saveDict(custom) {
+  saveConfig('DICT_CUSTOM', custom);
+  setCustomDictionary(custom);
+  renderDictEditor();
+}
+
+function renderDictEditor() {
+  const box = $('#dictGroups');
+  const openGroups = new Set([...box.querySelectorAll('details[open]')].map(d => d.dataset.g));
+  box.innerHTML = '';
+  GROUPS.forEach(({ key }) => {
+    const words = dictionaryWords(key);
+    const d = document.createElement('details');
+    d.className = 'dict-group';
+    d.dataset.g = key;
+    d.open = openGroups.has(key);
+    const sum = document.createElement('summary');
+    sum.textContent = `${groupLabel(key)} (${words.length})`;
+    d.appendChild(sum);
+    const chips = document.createElement('div');
+    chips.className = 'chips';
+    words.forEach(({ word, custom }) => chips.appendChild(makeChip(`${custom ? '✎ ' : ''}${word} ✕`, {
+      cls: 'small' + (custom ? ' custom' : ''),
+      title: 'Quitar',
+      onClick: () => {
+        if (!confirm(`¿Quitar "${word}" de ${GROUP[key].label}?`)) return;
+        const c = dictCustom();
+        if (custom) c.add[key] = (c.add[key] || []).filter(w => keyOf(w) !== keyOf(word));
+        else c.remove[key] = [...(c.remove[key] || []), word];
+        saveDict(c);
+      }
+    })));
+    d.appendChild(chips);
+    const add = document.createElement('form');
+    add.className = 'add-row';
+    add.innerHTML = '<input type="text" placeholder="Añadir palabra…" autocomplete="off"><button type="submit" class="ghost">Añadir</button>';
+    add.addEventListener('submit', e => {
+      e.preventDefault();
+      const v = add.querySelector('input').value.trim().toLowerCase();
+      if (!v) return;
+      const c = dictCustom();
+      c.remove[key] = (c.remove[key] || []).filter(w => keyOf(w) !== keyOf(v));
+      if (!dictionaryWords(key).some(w => keyOf(w.word) === keyOf(v))) c.add[key] = [...(c.add[key] || []), v];
+      saveDict(c);
+    });
+    d.appendChild(add);
+    const c = dictCustom();
+    if ((c.add[key] || []).length || (c.remove[key] || []).length) {
+      const reset = document.createElement('button');
+      reset.type = 'button';
+      reset.className = 'link small';
+      reset.textContent = 'Restablecer este grupo';
+      reset.addEventListener('click', () => {
+        if (!confirm(`¿Volver a las palabras originales de ${GROUP[key].label}?`)) return;
+        const cc = dictCustom();
+        delete cc.add[key];
+        delete cc.remove[key];
+        saveDict(cc);
+      });
+      d.appendChild(reset);
+    }
+    box.appendChild(d);
+  });
+
+  const list = $('#overrideList');
+  list.innerHTML = '';
+  const entries = Object.entries(state.overrides || {});
+  if (!entries.length) { const li = document.createElement('li'); li.className = 'hint'; li.textContent = 'Aún no has corregido nada.'; list.appendChild(li); }
+  entries.sort((a, b) => a[0].localeCompare(b[0])).forEach(([k, gs]) => {
+    const li = document.createElement('li');
+    const t = document.createElement('button');
+    t.type = 'button';
+    t.className = 'override-text';
+    t.textContent = `${k} → ${gs.length ? gs.map(g => GROUP[g].icon).join(' ') : 'ningún grupo'}`;
+    t.addEventListener('click', () => openGroupsEditor(k, renderDictEditor));
+    li.appendChild(t);
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'icon-btn small-x';
+    del.textContent = '✕';
+    del.setAttribute('aria-label', `Borrar corrección ${k}`);
+    del.addEventListener('click', () => {
+      delete state.overrides[k];
+      store.set('overrides', state.overrides);
+      state.queue.push({ id: uid(), at: Date.now(), op: 'groups', key: k, groups: null });
+      store.set('queue', state.queue);
+      renderDictEditor();
+      flush();
+    });
+    li.appendChild(del);
+    list.appendChild(li);
+  });
+}
+
+// ───────────────────────── ¿Qué como? ─────────────────────────
+
+const EAT_SLOTS = ['DES', 'MM1', 'MM2', 'COM', 'MER', 'AE', 'DU', 'DE', 'CEN'];
+const MAIN_SLOTS = ['DES', 'COM', 'MER', 'CEN'];
+
+/** Platos candidatos para una comida: combinaciones, tu lista de botones y el histórico. */
+function mealCandidates(slotKey) {
+  const h = state.history || {};
+  const texts = [];
+  const seen = new Set();
+  const add = (t, combo) => {
+    const k = keyOf(t);
+    if (!k || seen.has(k)) return;
+    seen.add(k);
+    texts.push({ text: t, combo });
+  };
+  store.get('fav:' + slotKey, []).forEach(t => add(t, listOf(t).length > 1));
+  ((h[slotKey] || {}).combos || []).forEach(r => add(r[0], true));
+  presetItems(slotKey).forEach(t => add(t, false));
+  ((h[slotKey] || {}).items || []).forEach(r => add(r[0], false));
+  ((h.ALL || {}).items || []).slice(0, 150).forEach(r => add(r[0], false));
+  // Propuestas cortas y realistas: nada de ensaladas de seis ingredientes ni platos de restaurante.
+  return texts
+    .filter(c => c.text.length <= 60 && listOf(c.text).length <= 3)
+    .map(c => ({ ...c, groups: classifyMeal(c.text, state.overrides).groups }))
+    .filter(c => c.groups.length);
+}
+
+function renderEat() {
+  const d = parseIso(state.date);
+  const isToday = state.date === todayIso();
+  $('#dateText').textContent = `${isToday ? 'Hoy, ' : ''}${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
+  const cards = $('#eatCards');
+  const done = $('#eatDone');
+  cards.innerHTML = '';
+  done.innerHTML = '';
+  if (!currentScheme()) {
+    $('#eatIntro').textContent = state.settings.url ? 'Cargando tu menú ideal…' : 'Configura la conexión en Ajustes.';
+    return;
+  }
+  const week = computeWeek(mondayOf(state.date));
+  const day = week.days.find(x => x.date === state.date);
+  const view = viewDay(state.date);
+  const pend = Object.keys(week.pending);
+  $('#eatIntro').textContent = pend.length
+    ? `Propuestas con tus platos de siempre para cumplir el menú de hoy y recuperar lo pendiente de la semana: ${pend.map(groupLabel).join(', ')}.`
+    : 'Propuestas con tus platos de siempre para cumplir el menú ideal de hoy.';
+
+  state.eatVariant = state.eatVariant || {};
+  let first = true;
+  // Lo que ya cubren las propuestas anteriores del día (para no repetir plato ni lo pendiente).
+  const plannedPending = new Set();
+  const usedTexts = new Set();
+  EAT_SLOTS.forEach(slot => {
+    const exp = day && day.expectedSlots[slot];
+    const has = (view.slots[slot] || '').trim();
+    if (has) {
+      if (exp || MAIN_SLOTS.includes(slot)) {
+        const p = document.createElement('p');
+        p.className = 'eat-done';
+        p.textContent = `✓ ${SLOT[slot].label}: ${has.split('\n').join(' · ')}`;
+        done.appendChild(p);
+      }
+      return;
+    }
+    if (!exp && !MAIN_SLOTS.includes(slot)) return;
+    const wanted = suggestGroups(week, state.date, slot)
+      .filter(w => !(w.reason === 'pending' && plannedPending.has(w.g) && (w.count || 1) <= 1));
+    const needs = wanted.map(w => ({ g: w.g, weight: w.reason === 'pending' ? 3 : 1 }));
+    const cands = mealCandidates(slot).filter(c => !usedTexts.has(keyOf(c.text)));
+    const proposals = needs.length ? proposeMeals(needs, cands) : [];
+    const v = (state.eatVariant[slot] || 0) % Math.max(1, proposals.length);
+    const prop = proposals[v];
+    if (prop) {
+      prop.parts.forEach(t => { if (classifyMeal(t, state.overrides).groups.some(g => ['PESCADO', 'CARNE', 'HUEVO', 'LEGUMBRE'].includes(g))) usedTexts.add(keyOf(t)); });
+      wanted.filter(w => w.reason === 'pending' && prop.covers.includes(w.g)).forEach(w => plannedPending.add(w.g));
+    }
+
+    const card = document.createElement('section');
+    card.className = 'card eat-card' + (first ? ' next' : '');
+    first = false;
+    const head = document.createElement('div');
+    head.className = 'eat-head';
+    head.innerHTML = '<h3></h3><span class="hint"></span>';
+    head.querySelector('h3').textContent = `${SLOT[slot].icon} ${SLOT[slot].label}`;
+    head.querySelector('.hint').textContent = exp && exp.training ? '🏃 hoy entrenas' : exp && exp.libre ? '✨ con algo a elegir' : '';
+    card.appendChild(head);
+
+    const want = document.createElement('div');
+    want.className = 'chips';
+    wanted.forEach(w => {
+      const c = document.createElement('span');
+      c.className = 'gchip ' + (prop && prop.covers.includes(w.g) ? 'ok' : prop && prop.later.includes(w.g) ? 'future' : 'miss');
+      c.textContent = groupLabel(w.g) + (w.reason === 'pending' ? ' · pendiente' : '') + (w.note ? ` (${w.note})` : '');
+      want.appendChild(c);
+    });
+    if (exp && exp.during) { const c = document.createElement('span'); c.className = 'gchip future'; c.textContent = '💧 algo durante el entreno'; want.appendChild(c); }
+    card.appendChild(want);
+
+    const body = document.createElement('div');
+    body.className = 'eat-proposal';
+    if (prop) {
+      const text = capFirst(prop.parts.map((t, i) => (i ? lowFirst(t) : t)).join(', '));
+      body.innerHTML = '<p class="eat-text"></p>';
+      body.querySelector('.eat-text').textContent = text;
+      if (prop.later.length) {
+        const m = document.createElement('p');
+        m.className = 'hint';
+        m.textContent = `${prop.later.map(groupLabel).join(', ')}: para otra comida (un solo plato de proteína por comida).`;
+        body.appendChild(m);
+      }
+      if (prop.missing.length) {
+        const m = document.createElement('p');
+        m.className = 'hint';
+        m.textContent = `No encuentro en tu histórico nada para: ${prop.missing.map(groupLabel).join(', ')}. Añádelo tú.`;
+        body.appendChild(m);
+      }
+      const actions = document.createElement('div');
+      actions.className = 'actions';
+      if (proposals.length > 1) {
+        const other = document.createElement('button');
+        other.type = 'button';
+        other.className = 'ghost';
+        other.textContent = `Otra idea (${v + 1}/${proposals.length})`;
+        other.addEventListener('click', () => { state.eatVariant[slot] = v + 1; renderEat(); });
+        actions.appendChild(other);
+      }
+      const reg = document.createElement('button');
+      reg.type = 'button';
+      reg.className = 'primary';
+      reg.textContent = 'Registrar esto';
+      reg.addEventListener('click', () => registerProposal(slot, prop.parts));
+      actions.appendChild(reg);
+      body.appendChild(actions);
+    } else {
+      body.innerHTML = `<p class="hint">${wanted.length ? 'Aún no tengo platos en tu histórico para proponerte algo.' : 'El menú ideal no pide nada concreto: lo que te apetezca.'}</p>`;
+      const reg = document.createElement('button');
+      reg.type = 'button';
+      reg.className = 'ghost';
+      reg.textContent = 'Registrar';
+      reg.addEventListener('click', () => { switchView('register'); openEntry(slot); });
+      body.appendChild(reg);
+    }
+    card.appendChild(body);
+    cards.appendChild(card);
+  });
+  if (!cards.children.length) {
+    const p = document.createElement('p');
+    p.className = 'card';
+    p.textContent = '🎉 Ya has registrado todas las comidas de hoy.';
+    cards.appendChild(p);
+  }
+}
+
+/** Abre el registro de esa comida con la propuesta ya escrita, para ajustarla y guardar. */
+function registerProposal(slot, parts) {
+  switchView('register');
+  openEntry(slot);
+  const ta = $('#foodText');
+  ta.value = capFirst(parts.map((t, i) => (i ? lowFirst(t) : t)).join(', '));
+  ta.dispatchEvent(new Event('input'));
+}
+
 // ───────────────────────── Arranque ─────────────────────────
 
 function init() {
@@ -1084,6 +1539,8 @@ function init() {
   }));
   $('#fixGroupsBtn').addEventListener('click', () => openGroupsEditor(clean($('#foodText').value), () => { renderDetected(); renderPlanBlock(); }));
   $('#groupsForm').addEventListener('submit', saveGroups);
+  $('#presetAddForm').addEventListener('submit', addPreset);
+  $('#reloadBtn').addEventListener('click', () => location.reload());
   $('#goToday').addEventListener('click', () => setDate(isoDate(new Date())));
   $('#dateInput').addEventListener('change', e => {
     if (!e.target.value) return;
@@ -1174,7 +1631,9 @@ function init() {
 
   store.set('lastOpen', state.date);
   state.weekStart = mondayOf(state.date);
+  setCustomDictionary(state.config && state.config.DICT_CUSTOM);
   switchView(state.view);
+  loadConfig();
   if (!state.settings.url) openSettings();
   refreshDay(state.date);
   loadHistory();

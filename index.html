@@ -12,7 +12,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="styles.css?v=4">
+  <link rel="stylesheet" href="styles.css?v=5">
 </head>
 <body>
   <header class="topbar">
@@ -48,6 +48,13 @@
     </section>
   </main>
 
+  <!-- ¿Qué como? Propuestas según lo que falta -->
+  <main id="eatView" hidden>
+    <p class="hint eat-intro" id="eatIntro"></p>
+    <div id="eatCards"></div>
+    <div id="eatDone"></div>
+  </main>
+
   <!-- Menú ideal: cumplimiento semanal -->
   <main id="planView" hidden>
     <p class="hint plan-loading" id="planStatus"></p>
@@ -66,9 +73,73 @@
     </section>
   </main>
 
+  <!-- Ajustes -->
+  <main id="configView" hidden>
+    <details class="card cfg" id="cfgConnection">
+      <summary>🔌 Conexión</summary>
+      <form id="settingsForm" class="cfg-body">
+        <label class="field">URL de la aplicación web (Apps Script)
+          <input type="url" id="urlInput" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off">
+        </label>
+        <label class="field">Token
+          <input type="password" id="tokenInput" autocomplete="off">
+        </label>
+        <p class="hint" id="settingsStatus"></p>
+        <div class="actions">
+          <button type="button" class="ghost" id="testBtn">Probar conexión</button>
+          <button type="submit" class="primary">Guardar</button>
+        </div>
+        <details class="pending">
+          <summary>Pendientes de enviar (<span id="pendingCount">0</span>)</summary>
+          <ul id="pendingList"></ul>
+          <button type="button" class="ghost danger" id="clearQueueBtn">Descartar pendientes</button>
+        </details>
+      </form>
+    </details>
+
+    <details class="card cfg">
+      <summary>ℹ️ Versión</summary>
+      <div class="cfg-body">
+        <p id="appVersion"></p>
+        <p id="scriptVersion" class="hint"></p>
+        <button type="button" class="ghost" id="reloadBtn">Buscar actualización</button>
+      </div>
+    </details>
+
+    <details class="card cfg" id="cfgPresets">
+      <summary>🍽️ Comida y bebida</summary>
+      <div class="cfg-body">
+        <p class="hint">Son los botones que salen al registrar. Se añade sola cualquier cosa que registres <b>3 veces o más en 30 días</b>. Si la quitas, no vuelve a añadirse.</p>
+        <div class="chips" id="presetTabs"></div>
+        <ul class="preset-list" id="presetList"></ul>
+        <form class="add-row" id="presetAddForm">
+          <input type="text" id="presetAddInput" placeholder="Añadir…" autocomplete="off">
+          <button type="submit" class="ghost">Añadir</button>
+        </form>
+        <details class="hidden-list" id="presetHiddenBox">
+          <summary>Quitados (<span id="presetHiddenCount">0</span>)</summary>
+          <div class="chips" id="presetHidden"></div>
+        </details>
+      </div>
+    </details>
+
+    <details class="card cfg" id="cfgDict">
+      <summary>📖 Diccionario</summary>
+      <div class="cfg-body">
+        <p class="hint">Palabras que identifican cada grupo del menú ideal. Basta con el principio de la palabra ("lenteja" sirve para "lentejas"). Las tuyas salen marcadas con ✎.</p>
+        <div id="dictGroups"></div>
+        <h4>Correcciones</h4>
+        <p class="hint">Lo que has corregido a mano con "Corregir". Manda sobre el diccionario.</p>
+        <ul class="preset-list" id="overrideList"></ul>
+      </div>
+    </details>
+  </main>
+
   <nav class="tabbar" aria-label="Apartados">
     <button type="button" data-view="register" class="on"><span>✏️</span>Registrar</button>
+    <button type="button" data-view="eat"><span>🍽️</span>¿Qué como?</button>
     <button type="button" data-view="plan"><span>📋</span>Menú ideal</button>
+    <button type="button" data-view="config"><span>⚙️</span>Ajustes</button>
   </nav>
 
   <!-- Hoja de registro -->
@@ -187,36 +258,11 @@
     </form>
   </dialog>
 
-  <!-- Ajustes -->
-  <dialog id="settingsSheet" class="sheet">
-    <form method="dialog" id="settingsForm">
-      <header class="sheet-head">
-        <h3>Ajustes</h3>
-        <button type="button" class="icon-btn" data-close aria-label="Cerrar">✕</button>
-      </header>
-      <label class="field">URL de la aplicación web (Apps Script)
-        <input type="url" id="urlInput" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off">
-      </label>
-      <label class="field">Token
-        <input type="password" id="tokenInput" autocomplete="off">
-      </label>
-      <p class="hint" id="settingsStatus"></p>
-      <div class="actions">
-        <button type="button" class="ghost" id="testBtn">Probar conexión</button>
-        <button type="submit" class="primary">Guardar</button>
-      </div>
-      <p class="hint" id="appVersion"></p>
-      <details class="pending">
-        <summary>Pendientes de enviar (<span id="pendingCount">0</span>)</summary>
-        <ul id="pendingList"></ul>
-        <button type="button" class="ghost danger" id="clearQueueBtn">Descartar pendientes</button>
-      </details>
-    </form>
-  </dialog>
+
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="plan.js?v=4"></script>
-  <script src="app.js?v=4"></script>
+  <script src="plan.js?v=5"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>

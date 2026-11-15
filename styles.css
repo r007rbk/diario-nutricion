@@ -245,3 +245,43 @@ body { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
 .chip.small { padding: 5px 9px; font-size: 13px; }
 .gedit-row { padding: 10px 0; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
 .gedit-text { font-weight: 600; }
+
+/* ── Ajustes ── */
+#configView { padding: 8px 16px 32px; max-width: 640px; margin: 0 auto; }
+body[data-view="config"] #prevDay, body[data-view="config"] #nextDay { visibility: hidden; }
+.tabbar { grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); }
+.cfg { padding: 0; }
+.cfg > summary { padding: 14px 12px; font-weight: 700; cursor: pointer; list-style: none; }
+.cfg > summary::-webkit-details-marker { display: none; }
+.cfg > summary::after { content: "›"; float: right; color: var(--muted); transition: transform .15s; }
+.cfg[open] > summary::after { transform: rotate(90deg); }
+.cfg-body { padding: 0 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.cfg-body p { margin: 0; }
+.cfg-body h4 { margin: 8px 0 0; }
+.preset-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.preset-list li { display: flex; align-items: center; gap: 6px; }
+.preset-list li input { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); font-size: 16px; color: var(--text); }
+.small-x { min-width: 34px; height: 34px; font-size: 16px; color: var(--muted); }
+.badge { font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 6px; background: var(--busy-soft); color: var(--busy); }
+.add-row { display: flex; gap: 6px; }
+.add-row input { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); font-size: 16px; color: var(--text); }
+.add-row .ghost { height: 40px; padding: 0 14px; }
+.hidden-list summary, .dict-group summary { font-size: 14px; font-weight: 600; padding: 6px 0; cursor: pointer; }
+.dict-group { border-bottom: 1px solid var(--line); padding: 4px 0 8px; }
+.dict-group .chips { margin-bottom: 8px; }
+.chip.custom { border-color: var(--accent); }
+.override-text { flex: 1; text-align: left; border: 0; background: none; padding: 8px 0; font-size: 14px; }
+
+/* ── ¿Qué como? ── */
+#eatView { padding: 8px 16px 32px; max-width: 640px; margin: 0 auto; }
+.eat-intro { margin: 8px 4px 0; }
+.eat-card { display: flex; flex-direction: column; gap: 10px; }
+.eat-card.next { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.eat-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.eat-head h3 { margin: 0; font-size: 17px; }
+.eat-text { margin: 0; font-size: 16px; font-weight: 600; line-height: 1.35; }
+.eat-proposal { display: flex; flex-direction: column; gap: 8px; }
+.eat-proposal .actions .ghost { flex: 0 0 auto; }
+#eatDone { margin-top: 16px; }
+.eat-done { margin: 4px 4px; font-size: 13px; color: var(--muted); }
+.tabbar button { font-size: 11px; }
