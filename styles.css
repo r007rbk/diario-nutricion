@@ -331,3 +331,14 @@ code { font-size: 12px; background: var(--bg); padding: 1px 4px; border-radius: 
   background: var(--card); border-top: 1px solid var(--line);
 }
 .sheet-foot textarea { font-size: 15px !important; min-height: 44px; }
+
+/* Plato Harvard automático */
+.harvard { padding: 10px 12px; border-radius: 12px; background: var(--bg); }
+.harvard-head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 15px; }
+.harvard-score { font-size: 14px; }
+.harvard-score.good { color: var(--accent); }
+.harvard-score.mid { color: var(--warn); }
+.harvard-score.bad { color: #d9534f; }
+.harvard-items .chip { background: var(--card); }
+.harvard-items .chip.no { border-color: color-mix(in srgb, #d9534f 45%, var(--line)); color: var(--text); }
+.switch.small { font-size: 14px; }

@@ -12,7 +12,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="styles.css?v=7">
+  <link rel="stylesheet" href="styles.css?v=8">
 </head>
 <body>
   <header class="topbar">
@@ -225,12 +225,13 @@
         </div>
         <input type="hidden" id="suppText">
 
-        <details class="harvard" id="harvardBox">
-          <summary><span>🥗 Plato Harvard</span> <span class="hint" id="harvardSum"></span></summary>
-          <label class="switch"><input type="checkbox" id="harvardOn"> Anotarlo en COMENTARIOS</label>
-          <div class="chips harvard-items" id="harvardItems" hidden></div>
+        <div class="harvard" id="harvardBox">
+          <div class="harvard-head"><span>🥗 Plato Harvard</span><span class="harvard-score" id="harvardSum"></span></div>
+          <div class="chips harvard-items" id="harvardItems"></div>
+          <p class="hint" id="harvardTips"></p>
+          <label class="switch small"><input type="checkbox" id="harvardOn"> Anotarlo en COMENTARIOS</label>
           <p class="hint" id="harvardPreview" hidden></p>
-        </details>
+        </div>
       </div>
 
       <div class="sheet-foot">
@@ -279,7 +280,7 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="plan.js?v=7"></script>
-  <script src="app.js?v=7"></script>
+  <script src="plan.js?v=8"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>

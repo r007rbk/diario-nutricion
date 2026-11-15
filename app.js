@@ -1,7 +1,7 @@
 'use strict';
 
 // Cambia junto con ?v= en index.html y VERSION en sw.js.
-const APP_VERSION = 7;
+const APP_VERSION = 8;
 
 // Si algo falla, que se vea en pantalla en lugar de no hacer nada.
 window.addEventListener('error', e => toast(`Error: ${e.message}`));
@@ -27,12 +27,42 @@ const SLOTS = [
 const SLOT = Object.fromEntries(SLOTS.map(s => [s.key, s]));
 
 const HARVARD = [
-  { key: 'verdura', label: 'Verdura/fruta ½' },
-  { key: 'proteína', label: 'Proteína ¼' },
-  { key: 'integral', label: 'Cereal integral ¼' },
+  { key: 'verdura', label: 'Verdura/fruta' },
+  { key: 'proteína', label: 'Proteína' },
+  { key: 'integral', label: 'Cereal integral' },
   { key: 'aceite', label: 'Aceite de oliva' },
   { key: 'agua', label: 'Agua / sin azúcar' }
 ];
+
+// Valoración automática del plato Harvard a partir de lo escrito (sin acentos, minúsculas).
+const HARVARD_PROTEIN = ['PESCADO', 'LEGUMBRE', 'CARNE', 'HUEVO', 'FS'];
+const WHOLE_RE = /\b(integral(es)?|avena|quinoa|centeno|espelta|trigo sarraceno|mijo|bulgur|salvado)\b/;
+const OIL_RE = /\b(aceite|aove|oliva|alinad[ao]s?|alino)\b/;
+const SUGARY_RE = /\b(coca ?-?cola|fanta|refresco|zumo|batido|nestea|aquarius|tonica|red ?bull|monster|vino|cerveza|vermut|cava|sidra|copa|cubata|gin|ron|whisky|colacao|cola cao)\b/;
+const SUGAR_FREE_RE = /\b(zero|light|sin azucar|sin alcohol|0[.,]0|0)\b/;
+
+/** Qué cumple lo escrito: { verdura: true, …, tips: [...] }. Las cantidades no se pueden comprobar. */
+function harvardAuto(foodText, drinksText) {
+  const food = keyOf(foodText);
+  const groups = classifyMeal(clean(foodText), state.overrides).groups;
+  const drinks = listOf(drinksText).map(keyOf);
+  const sugary = drinks.filter(d => SUGARY_RE.test(d) && !SUGAR_FREE_RE.test(d));
+  const r = {
+    verdura: groups.includes('VERDURA') || groups.includes('FRUTA'),
+    'proteína': HARVARD_PROTEIN.some(g => groups.includes(g)),
+    integral: groups.includes('CHO') && WHOLE_RE.test(food),
+    aceite: OIL_RE.test(food),
+    agua: drinks.length > 0 && !sugary.length
+  };
+  r.tips = {
+    verdura: 'añade verdura o fruta (la mitad del plato)',
+    'proteína': 'añade proteína: pescado, pollo, huevo, legumbre o frutos secos',
+    integral: groups.includes('CHO') ? 'el cereal no es integral (pan, pasta o arroz integral)' : 'añade cereal integral (un cuarto del plato)',
+    aceite: '¿llevaba aceite de oliva? Si es así, tócalo',
+    agua: drinks.length ? `mejor agua, infusión o café que ${sugary.join(', ')}` : 'pon la bebida (agua, infusión…)'
+  };
+  return r;
+}
 
 // Campos de las actividades. type: chips (una opción + "otro" libre), num, dur, text
 const ACTIVITY_FIELDS = {
@@ -483,7 +513,6 @@ function buildFoodBox(slot, menu) {
   form.showAllItems = false;
   form.harvardTouched = {};
   form.foodTab = 'hab';
-  $('#harvardBox').open = false;
 
   // Lugar (una opción), en una fila que se desliza
   const places = $('#placeChips');
@@ -511,14 +540,14 @@ function buildFoodBox(slot, menu) {
   HARVARD.forEach(h => {
     items.appendChild(makeChip(h.label, {
       onClick: e => {
+        // Tocar corrige la valoración automática de ese punto.
         form.harvard[h.key] = !form.harvard[h.key];
         form.harvardTouched[h.key] = true;
-        e.currentTarget.classList.toggle('on', form.harvard[h.key]);
         updateLine();
       }
     }));
+    items.lastChild.dataset.h = h.key;
   });
-  items.hidden = !slot.harvard;
 }
 
 /** Chips de bebida o suplementos en una fila: añaden/quitan del campo oculto. */
@@ -661,6 +690,31 @@ function composeFood() {
   return parts.join('. ');
 }
 
+function applyHarvardAuto() {
+  form.harvardAuto = harvardAuto($('#foodText').value, $('#drinkText').value);
+  HARVARD.forEach(h => { if (!form.harvardTouched[h.key]) form.harvard[h.key] = form.harvardAuto[h.key]; });
+}
+
+/** "Cumple 3 de 5" con cada punto ✓/✗ y qué cambiar para cumplirlo. */
+function renderHarvard() {
+  const empty = !clean($('#foodText').value);
+  const ok = HARVARD.filter(h => form.harvard[h.key]).length;
+  const sum = $('#harvardSum');
+  sum.textContent = empty ? '' : ok === HARVARD.length ? 'Cumple ✓' : `Cumple ${ok} de ${HARVARD.length}`;
+  sum.className = 'harvard-score' + (empty ? '' : ok === HARVARD.length ? ' good' : ok >= 3 ? ' mid' : ' bad');
+  [...$('#harvardItems').children].forEach(c => {
+    const h = HARVARD.find(x => x.key === c.dataset.h);
+    const yes = !!form.harvard[h.key];
+    c.textContent = empty ? h.label : `${yes ? '✓' : '✗'} ${h.label}${form.harvardTouched[h.key] ? ' ✎' : ''}`;
+    c.classList.toggle('on', !empty && yes);
+    c.classList.toggle('no', !empty && !yes);
+  });
+  const tips = HARVARD.filter(h => !form.harvard[h.key]).map(h => form.harvardAuto.tips[h.key]);
+  $('#harvardTips').textContent = empty
+    ? 'Se valora solo con lo que pongas en la comida y la bebida.'
+    : tips.length ? `Para cumplirlo: ${tips.join(' · ')}.` : 'Las cantidades no se comprueban: verdura la mitad, proteína y cereal un cuarto cada uno.';
+}
+
 function harvardNote() {
   if (form.slot.kind !== 'food' || !$('#harvardOn').checked) return '';
   const label = form.slot.short || form.slot.label;
@@ -680,13 +734,11 @@ function updateLine() {
   const lt = $('#lineText');
   lt.style.height = 'auto';
   lt.style.height = Math.min(lt.scrollHeight + 2, 96) + 'px';
+  if (slot.kind === 'food') applyHarvardAuto();
   const note = harvardNote();
   $('#harvardPreview').hidden = !note;
   $('#harvardPreview').textContent = note ? `+ en COMENTARIOS: ${note}` : '';
-  if (slot.kind === 'food') {
-    const ok = HARVARD.filter(h => form.harvard[h.key]).length;
-    $('#harvardSum').textContent = $('#harvardOn').checked ? `${ok}/${HARVARD.length} ✓` : 'no se anota';
-  }
+  if (slot.kind === 'food') renderHarvard();
   const favs = store.get('fav:' + slot.key, []);
   const favText = slot.kind === 'food' ? clean($('#foodText').value) : '';
   $('#favBtn').hidden = slot.kind !== 'food';
@@ -1795,13 +1847,6 @@ function init() {
   $('#searchInput').addEventListener('input', renderFoodSuggestions);
   $('#suppText').addEventListener('input', () => { form.lineDirty = false; updateLine(); });
   $('#drinkText').addEventListener('input', () => {
-    // Si bebes agua, se marca sola en el plato Harvard (salvo que lo hayas tocado tú).
-    const agua = /\bagua\b/i.test($('#drinkText').value);
-    if (!form.harvardTouched.agua) {
-      form.harvard.agua = agua;
-      const chip = [...$('#harvardItems').children].find(c => c.textContent.startsWith('Agua'));
-      if (chip) chip.classList.toggle('on', agua);
-    }
     form.lineDirty = false;
     updateLine();
   });
@@ -1817,7 +1862,7 @@ function init() {
     form.lineDirty = false;
     updateLine();
   });
-  $('#harvardOn').addEventListener('change', () => { $('#harvardItems').hidden = !$('#harvardOn').checked; updateLine(); });
+  $('#harvardOn').addEventListener('change', updateLine);
   $('#searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } });
   $('#favBtn').addEventListener('click', () => {
     const key = form.slot.key;
