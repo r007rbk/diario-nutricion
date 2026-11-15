@@ -12,7 +12,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="styles.css?v=6">
+  <link rel="stylesheet" href="styles.css?v=7">
 </head>
 <body>
   <header class="topbar">
@@ -167,6 +167,7 @@
     <form method="dialog" id="entryForm">
       <header class="sheet-head">
         <h3 id="sheetTitle">—</h3>
+        <input type="time" id="timeInput" class="head-time" required aria-label="Hora">
         <button type="button" class="icon-btn" data-close aria-label="Cerrar">✕</button>
       </header>
 
@@ -178,10 +179,6 @@
         <pre id="currentText"></pre>
       </div>
 
-      <label class="field time-field">Hora
-        <input type="time" id="timeInput" required>
-      </label>
-
       <div class="seg" id="modeSeg" role="tablist" hidden>
         <button type="button" data-mode="fields" class="on">Campos</button>
         <button type="button" data-mode="text">Texto libre</button>
@@ -190,60 +187,60 @@
       <div id="fieldsBox"></div>
 
       <div id="foodBox" hidden>
-        <p class="hint ideal" id="idealHint" hidden></p>
-
-        <div class="block">
-          <span class="block-label">Lugar</span>
-          <div class="chips" id="placeChips">
-            <input type="text" id="placeOther" class="other" placeholder="Otro…" aria-label="Otro lugar">
-          </div>
-        </div>
-
-        <input type="search" id="searchInput" class="search" placeholder="Buscar en el histórico…" autocomplete="off">
-
-        <div class="block" id="combosBlock">
-          <span class="block-label">Combinaciones habituales</span>
-          <div class="chips" id="comboChips"></div>
-        </div>
-        <div class="block">
-          <span class="block-label">Comida</span>
-          <div class="chips" id="itemChips"></div>
-        </div>
-        <div class="plan-block" id="planBlock" hidden>
-          <span class="block-label">📋 Según tu menú ideal</span>
-          <div class="chips" id="planGroupChips"></div>
-          <div class="chips" id="planIdeaChips"></div>
+        <div class="chips scroll" id="placeChips">
+          <span class="row-icon" aria-hidden="true">📍</span>
+          <input type="text" id="placeOther" class="other" placeholder="Otro…" aria-label="Otro lugar" enterkeyhint="done">
         </div>
 
         <label class="field">Qué has comido
-          <textarea id="foodText" rows="2" placeholder="Toca arriba o escribe: café con leche, pan integral con tomate…"></textarea>
+          <textarea id="foodText" rows="2" placeholder="Toca abajo o escribe: café con leche, pan integral con tomate…"></textarea>
         </label>
+        <div class="chips" id="planGroupChips" hidden></div>
+        <p class="hint ideal" id="idealHint" hidden></p>
         <p class="detected" id="detectedLine" hidden><span id="detectedText"></span> <button type="button" class="link" id="fixGroupsBtn">Corregir</button></p>
 
-        <div class="block">
-          <span class="block-label">💧 Bebida</span>
-          <div class="chips" id="drinkChips"></div>
-          <input type="text" id="drinkText" class="list-input" placeholder="Ej: agua, cerveza 0" autocomplete="off">
+        <div class="seg tabs" id="foodTabs" role="tablist">
+          <button type="button" data-tab="hab" class="on">Habituales</button>
+          <button type="button" data-tab="plan" id="planTabBtn">📋 Menú ideal</button>
+          <button type="button" data-tab="search">🔍 Buscar</button>
         </div>
-        <div class="block">
-          <span class="block-label">💊 Suplementos</span>
-          <div class="chips" id="suppChips"></div>
-          <input type="text" id="suppText" class="list-input" placeholder="Ej: Natalbel, vitamina D" autocomplete="off">
+        <div class="tab-panel" id="habPanel">
+          <input type="search" id="searchInput" class="search" placeholder="Buscar en todo el histórico…" autocomplete="off" hidden>
+          <div class="chips" id="combosBlock"><div class="chips" id="comboChips"></div></div>
+          <div class="chips" id="itemChips"></div>
         </div>
-        <div class="harvard">
-          <label class="switch"><input type="checkbox" id="harvardOn"> Valorar plato Harvard</label>
+        <div class="tab-panel plan-block" id="planBlock" hidden>
+          <p class="hint" id="planHint"></p>
+          <div class="chips" id="planIdeaChips"></div>
+        </div>
+
+        <div class="chips scroll" id="drinkChips">
+          <span class="row-icon" aria-hidden="true">💧</span>
+          <input type="text" id="drinkOther" class="other" placeholder="Otra…" aria-label="Otra bebida" enterkeyhint="done">
+        </div>
+        <input type="hidden" id="drinkText">
+        <div class="chips scroll" id="suppChips">
+          <span class="row-icon" aria-hidden="true">💊</span>
+          <input type="text" id="suppOther" class="other" placeholder="Otro…" aria-label="Otro suplemento" enterkeyhint="done">
+        </div>
+        <input type="hidden" id="suppText">
+
+        <details class="harvard" id="harvardBox">
+          <summary><span>🥗 Plato Harvard</span> <span class="hint" id="harvardSum"></span></summary>
+          <label class="switch"><input type="checkbox" id="harvardOn"> Anotarlo en COMENTARIOS</label>
           <div class="chips harvard-items" id="harvardItems" hidden></div>
-        </div>
+          <p class="hint" id="harvardPreview" hidden></p>
+        </details>
       </div>
 
-      <label class="field">Así quedará en el Sheet
-        <textarea id="lineText" rows="2" required></textarea>
-      </label>
-      <p class="hint" id="harvardPreview" hidden></p>
-
-      <div class="actions">
-        <button type="button" class="ghost" id="favBtn">☆ Favorito</button>
-        <button type="submit" class="primary" id="saveBtn">Guardar</button>
+      <div class="sheet-foot">
+        <label class="field">Así quedará en el Sheet
+          <textarea id="lineText" rows="1" required></textarea>
+        </label>
+        <div class="actions">
+          <button type="button" class="ghost" id="favBtn">☆ Favorito</button>
+          <button type="submit" class="primary" id="saveBtn">Guardar</button>
+        </div>
       </div>
     </form>
   </dialog>
@@ -282,7 +279,7 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="plan.js?v=6"></script>
-  <script src="app.js?v=6"></script>
+  <script src="plan.js?v=7"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>

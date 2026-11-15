@@ -1,7 +1,7 @@
 'use strict';
 
 // Cambia junto con ?v= en index.html y VERSION en sw.js.
-const APP_VERSION = 6;
+const APP_VERSION = 7;
 
 // Si algo falla, que se vea en pantalla en lugar de no hacer nada.
 window.addEventListener('error', e => toast(`Error: ${e.message}`));
@@ -316,6 +316,7 @@ function openEntry(key) {
 
   $('#sheetTitle').textContent = `${slot.icon} ${slot.label}`;
   $('#timeInput').value = nowTime();
+  $('#timeInput').hidden = slot.kind === 'note';
 
   const view = viewDay(state.date);
   const current = view.slots[key] || '';
@@ -468,35 +469,41 @@ function makeChip(text, { on = false, cls = '', title = '', onClick, onHold } = 
 
 function buildFoodBox(slot, menu) {
   const ideal = menu && menu[slot.key];
+  form.idealText = ideal ? `Menú ideal: ${ideal.replace(/\n/g, ' · ')}` : '';
   $('#idealHint').hidden = !ideal;
-  $('#idealHint').textContent = ideal ? `Menú ideal: ${ideal.replace(/\n/g, ' · ')}` : '';
+  $('#idealHint').textContent = form.idealText;
   $('#foodText').value = '';
   $('#drinkText').value = '';
   $('#suppText').value = '';
+  $('#drinkOther').value = '';
+  $('#suppOther').value = '';
   $('#placeOther').value = '';
   $('#searchInput').value = '';
   form.place = '';
   form.showAllItems = false;
   form.harvardTouched = {};
+  form.foodTab = 'hab';
+  $('#harvardBox').open = false;
 
-  // Lugar (una opción)
+  // Lugar (una opción), en una fila que se desliza
   const places = $('#placeChips');
   places.querySelectorAll('.chip').forEach(c => c.remove());
   const placeList = presetItems('LUGARES');
-  placeList.slice().reverse().forEach(p => {
-    places.prepend(makeChip(p, {
+  placeList.forEach(p => {
+    places.insertBefore(makeChip(p, {
       onClick: () => {
         form.place = keyOf(form.place) === keyOf(p) ? '' : p;
         $('#placeOther').value = '';
         refreshChips();
         updateLine();
       }
-    }));
+    }), $('#placeOther'));
   });
 
   renderFoodSuggestions();
-  renderListChips('#drinkChips', '#drinkText', presetItems('BEBIDAS'), [], true);
-  renderListChips('#suppChips', '#suppText', presetItems('SUPLEMENTOS'), []);
+  renderListChips('#drinkChips', '#drinkText', presetItems('BEBIDAS'), true);
+  renderListChips('#suppChips', '#suppText', presetItems('SUPLEMENTOS'));
+  setFoodTab('hab');
 
   $('#harvardOn').checked = !!slot.harvard;
   const items = $('#harvardItems');
@@ -514,14 +521,40 @@ function buildFoodBox(slot, menu) {
   items.hidden = !slot.harvard;
 }
 
-/** Chips de bebida o suplementos: añaden/quitan del campo de texto. */
-function renderListChips(boxSel, inputSel, list, always, lower = false) {
+/** Chips de bebida o suplementos en una fila: añaden/quitan del campo oculto. */
+function renderListChips(boxSel, inputSel, list, lower = false) {
   const box = $(boxSel);
-  box.innerHTML = '';
-  const all = [...list];
-  always.forEach(a => { if (!all.some(x => keyOf(x) === keyOf(a))) all.unshift(a); });
-  all.forEach(t => box.appendChild(makeChip(t, { onClick: () => toggleInList($(inputSel), t, { lower }) })));
-  box.hidden = !all.length;
+  box.querySelectorAll('.chip').forEach(c => c.remove());
+  box.dataset.input = inputSel;
+  box.dataset.lower = lower ? '1' : '';
+  list.forEach(t => addListChip(box, t));
+}
+
+function addListChip(box, t) {
+  const other = box.querySelector('.other');
+  box.insertBefore(makeChip(t, { onClick: () => toggleInList($(box.dataset.input), t, { lower: !!box.dataset.lower }) }), other);
+}
+
+/** "Otra…": lo que escribes se convierte en un chip marcado. */
+function addOtherToList(otherEl) {
+  const box = otherEl.closest('.chips');
+  const input = $(box.dataset.input);
+  listOf(otherEl.value).forEach(t => {
+    if (!listOf(input.value).some(x => keyOf(x) === keyOf(t))) toggleInList(input, t, { lower: !!box.dataset.lower });
+  });
+  otherEl.value = '';
+}
+
+/** Pestañas de sugerencias: Habituales, Menú ideal y Buscar. */
+function setFoodTab(tab) {
+  form.foodTab = tab;
+  document.querySelectorAll('#foodTabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+  $('#habPanel').hidden = tab === 'plan';
+  $('#planBlock').hidden = tab !== 'plan';
+  const search = $('#searchInput');
+  search.hidden = tab !== 'search';
+  if (tab !== 'search' && search.value) { search.value = ''; renderFoodSuggestions(); }
+  if (tab === 'search') search.focus();
 }
 
 /** Combinaciones (favoritos ★, recientes y del histórico) y elementos sueltos. */
@@ -598,6 +631,11 @@ function refreshChips() {
     document.querySelectorAll(`${boxSel} .chip`).forEach(c => c.classList.toggle('on', keys.has(c.dataset.key)));
   };
   mark('#itemChips', $('#foodText').value);
+  ['#drinkChips', '#suppChips'].forEach(sel => {
+    const box = $(sel);
+    const have = new Set([...box.querySelectorAll('.chip')].map(c => c.dataset.key));
+    listOf($(box.dataset.input || '#none')?.value).forEach(t => { if (!have.has(keyOf(t))) addListChip(box, t); });
+  });
   mark('#drinkChips', $('#drinkText').value);
   mark('#suppChips', $('#suppText').value);
   document.querySelectorAll('#placeChips .chip').forEach(c => c.classList.toggle('on', !!form.place && c.dataset.key === keyOf(form.place)));
@@ -639,14 +677,21 @@ function updateLine() {
       $('#lineText').value = body ? `${sheetTime($('#timeInput').value)} ${body}` : '';
     }
   }
+  const lt = $('#lineText');
+  lt.style.height = 'auto';
+  lt.style.height = Math.min(lt.scrollHeight + 2, 96) + 'px';
   const note = harvardNote();
   $('#harvardPreview').hidden = !note;
   $('#harvardPreview').textContent = note ? `+ en COMENTARIOS: ${note}` : '';
+  if (slot.kind === 'food') {
+    const ok = HARVARD.filter(h => form.harvard[h.key]).length;
+    $('#harvardSum').textContent = $('#harvardOn').checked ? `${ok}/${HARVARD.length} ✓` : 'no se anota';
+  }
   const favs = store.get('fav:' + slot.key, []);
   const favText = slot.kind === 'food' ? clean($('#foodText').value) : '';
   $('#favBtn').hidden = slot.kind !== 'food';
   $('#favBtn').textContent = favText && favs.includes(favText) ? '★ Favorito' : '☆ Favorito';
-  if (slot.kind === 'food') { refreshChips(); renderDetected(); renderPlanBlock(); }
+  if (slot.kind === 'food') { refreshChips(); renderPlanBlock(); renderDetected(); }
 }
 
 function rememberRecent(slotKey, text) {
@@ -976,22 +1021,30 @@ function switchView(view) {
 /** Lo que falta hoy para esta franja (esquema + pendiente de la semana) y lo que ya cubre el texto. */
 function renderPlanBlock() {
   const slot = form.slot;
-  const box = $('#planBlock');
-  if (!slot || slot.kind !== 'food' || !currentScheme()) { box.hidden = true; return; }
+  const gbox = $('#planGroupChips');
+  form.wantedGroups = [];
+  const showPlan = on => {
+    gbox.hidden = !on;
+    $('#planTabBtn').hidden = !on;
+    $('#idealHint').hidden = on || !form.idealText;
+    if (!on && form.foodTab === 'plan') setFoodTab('hab');
+  };
+  if (!slot || slot.kind !== 'food' || !currentScheme()) { showPlan(false); return; }
   const week = computeWeek(mondayOf(state.date));
   // Se calcula sin lo que estás escribiendo, y luego se marca lo que ya cubre.
   const wanted = suggestGroups(week, state.date, slot.key);
-  box.hidden = !wanted.length;
+  form.wantedGroups = wanted.map(w => w.g);
+  showPlan(!!wanted.length);
   if (!wanted.length) return;
   const typed = new Set(classifyMeal(clean($('#foodText').value), state.overrides).groups);
-  const gbox = $('#planGroupChips');
   gbox.innerHTML = '';
   wanted.forEach(w => {
-    const label = groupLabel(w.g) + (w.note ? ` (${w.note})` : '') + (w.reason === 'pending' ? ` · pendiente ×${w.count}` : '');
+    const label = groupLabel(w.g) + (w.note ? ` (${w.note})` : '') + (w.reason === 'pending' ? ` ×${w.count}` : '');
     const chip = makeChip(label, {
       cls: 'gsel' + (w.reason === 'pending' ? ' warn-chip' : '') + (form.planGroup === w.g ? ' sel' : ''),
-      onClick: () => { form.planGroup = form.planGroup === w.g ? null : w.g; renderPlanBlock(); }
+      onClick: () => { form.planGroup = form.planGroup === w.g ? null : w.g; setFoodTab('plan'); renderPlanBlock(); }
     });
+    chip.classList.add('small');
     chip.classList.toggle('on', typed.has(w.g));
     gbox.appendChild(chip);
   });
@@ -1000,6 +1053,11 @@ function renderPlanBlock() {
   const need = form.planGroup ? [form.planGroup] : wanted.map(w => w.g).filter(g => !typed.has(g));
   const ideas = $('#planIdeaChips');
   ideas.innerHTML = '';
+  const missingCount = wanted.filter(w => !typed.has(w.g)).length;
+  $('#planTabBtn').textContent = missingCount ? `📋 Falta ${missingCount}` : '📋 Cumple ✓';
+  $('#planHint').textContent = need.length
+    ? `Ideas de tu histórico para: ${need.map(groupLabel).join(', ')}.` + (wanted.some(w => w.reason === 'pending') ? ' En naranja, lo pendiente de otros días de la semana (×veces).' : '')
+    : 'Ya cubres lo que pide el menú ideal en esta comida.';
   if (!need.length) return;
   const h = state.history || {};
   const pool = [...((h[slot.key] || {}).items || []), ...((h.ALL || {}).items || [])].map(r => r[0]);
@@ -1028,7 +1086,11 @@ function renderDetected() {
   line.hidden = !text;
   if (!text) return;
   const g = classifyMeal(text, state.overrides).groups;
-  $('#detectedText').textContent = g.length ? `Detectado: ${g.map(groupLabel).join(' · ')}` : 'No reconozco ningún grupo.';
+  // Los grupos del menú ideal ya se ven marcados arriba: aquí solo lo demás.
+  const extra = g.filter(x => !(form.wantedGroups || []).includes(x));
+  $('#detectedText').textContent = !g.length ? 'No reconozco ningún grupo.'
+    : extra.length ? `${(form.wantedGroups || []).length ? 'También' : 'Detectado'}: ${extra.map(groupLabel).join(' · ')}` : '';
+  $('#fixGroupsBtn').textContent = extra.length || !g.length ? 'Corregir' : '¿Grupos mal? Corregir';
 }
 
 // ── Corregir grupos ──
@@ -1743,12 +1805,20 @@ function init() {
     form.lineDirty = false;
     updateLine();
   });
+  document.querySelectorAll('#foodTabs button').forEach(b => b.addEventListener('click', () => setFoodTab(b.dataset.tab)));
+  ['#drinkOther', '#suppOther'].forEach(sel => {
+    const el = $(sel);
+    el.addEventListener('change', () => addOtherToList(el));
+    el.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addOtherToList(el); } });
+  });
+  $('#placeOther').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } });
   $('#placeOther').addEventListener('input', () => {
     form.place = $('#placeOther').value.trim();
     form.lineDirty = false;
     updateLine();
   });
   $('#harvardOn').addEventListener('change', () => { $('#harvardItems').hidden = !$('#harvardOn').checked; updateLine(); });
+  $('#searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } });
   $('#favBtn').addEventListener('click', () => {
     const key = form.slot.key;
     const text = clean($('#foodText').value);

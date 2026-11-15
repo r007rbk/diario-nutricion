@@ -294,3 +294,40 @@ body[data-view="config"] #prevDay, body[data-view="config"] #nextDay { visibilit
 .strava-item .hint { margin: 0; }
 .strava-item .actions { margin-top: 4px; }
 code { font-size: 12px; background: var(--bg); padding: 1px 4px; border-radius: 4px; }
+
+/* Registro de comida: lo que llevas arriba, sugerencias en pestañas y Guardar fijo abajo */
+.head-time {
+  margin: 0 8px 0 auto; padding: 6px 8px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--bg); font-size: 16px; color: var(--text);
+}
+.head-time[hidden] { display: none; }
+.chips.scroll {
+  flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  margin: 0 -16px; padding: 2px 16px;
+}
+.chips.scroll::-webkit-scrollbar { display: none; }
+.chips.scroll .chip { flex: 0 0 auto; }
+.chips.scroll .other { flex: 0 0 110px; min-width: 110px; }
+.row-icon { flex: 0 0 auto; font-size: 18px; }
+.seg.tabs { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 1fr; }
+.seg.tabs button[hidden] { display: none; }
+.tab-panel { display: flex; flex-direction: column; gap: 8px; }
+.tab-panel[hidden] { display: none; }
+#combosBlock[hidden], #planGroupChips[hidden] { display: none; }
+#planGroupChips { margin-top: -6px; }
+.harvard summary {
+  list-style: none; display: flex; justify-content: space-between; align-items: center;
+  font-size: 15px; font-weight: 600; padding: 4px 0; cursor: pointer;
+}
+.harvard summary::-webkit-details-marker { display: none; }
+.harvard summary::after { content: "▸"; color: var(--muted); margin-left: 8px; }
+.harvard[open] summary::after { content: "▾"; }
+.harvard summary .hint { margin-left: auto; }
+.sheet-foot {
+  position: sticky; bottom: calc(-16px - env(safe-area-inset-bottom)); z-index: 1;
+  display: flex; flex-direction: column; gap: 8px;
+  margin: 0 -16px calc(-16px - env(safe-area-inset-bottom));
+  padding: 10px 16px calc(16px + env(safe-area-inset-bottom));
+  background: var(--card); border-top: 1px solid var(--line);
+}
+.sheet-foot textarea { font-size: 15px !important; min-height: 44px; }
