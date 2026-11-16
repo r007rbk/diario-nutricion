@@ -12,7 +12,7 @@ Móvil (app web instalada)  ──►  Google Apps Script  ──►  celda del 
 - **Registro rápido** por franja (desayuno, media mañana, comida, merienda, cena, alrededor del deporte y actividad), con la hora puesta sola.
 - **Sugerencias** a partir de lo que has registrado otros días.
 - **Bebida, suplementos y lugar** en apartados separados.
-- **Plato Harvard:** comprobación rápida que se anota en comentarios.
+- **Plato Harvard:** indica si la comida lo cumple y qué falta (solo informativo).
 - **Menú ideal:** compara lo registrado con el esquema de la hoja, por día y por semana.
 - **¿Qué como?:** propone comidas para cumplir el menú ideal.
 - **Ajustes:** botones de comida y bebida, y diccionario de alimentos editables.

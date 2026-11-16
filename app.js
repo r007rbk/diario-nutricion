@@ -1,7 +1,7 @@
 'use strict';
 
 // Cambia junto con ?v= en index.html y VERSION en sw.js.
-const APP_VERSION = 8;
+const APP_VERSION = 9;
 
 // Si algo falla, que se vea en pantalla en lugar de no hacer nada.
 window.addEventListener('error', e => toast(`Error: ${e.message}`));
@@ -534,7 +534,6 @@ function buildFoodBox(slot, menu) {
   renderListChips('#suppChips', '#suppText', presetItems('SUPLEMENTOS'));
   setFoodTab('hab');
 
-  $('#harvardOn').checked = !!slot.harvard;
   const items = $('#harvardItems');
   items.innerHTML = '';
   HARVARD.forEach(h => {
@@ -715,12 +714,6 @@ function renderHarvard() {
     : tips.length ? `Para cumplirlo: ${tips.join(' · ')}.` : 'Las cantidades no se comprueban: verdura la mitad, proteína y cereal un cuarto cada uno.';
 }
 
-function harvardNote() {
-  if (form.slot.kind !== 'food' || !$('#harvardOn').checked) return '';
-  const label = form.slot.short || form.slot.label;
-  return `${label} Harvard: ` + HARVARD.map(h => `${h.key} ${form.harvard[h.key] ? '✓' : '✗'}`).join(' · ');
-}
-
 function updateLine() {
   const slot = form.slot;
   if (!form.lineDirty) {
@@ -735,9 +728,6 @@ function updateLine() {
   lt.style.height = 'auto';
   lt.style.height = Math.min(lt.scrollHeight + 2, 96) + 'px';
   if (slot.kind === 'food') applyHarvardAuto();
-  const note = harvardNote();
-  $('#harvardPreview').hidden = !note;
-  $('#harvardPreview').textContent = note ? `+ en COMENTARIOS: ${note}` : '';
   if (slot.kind === 'food') renderHarvard();
   const favs = store.get('fav:' + slot.key, []);
   const favText = slot.kind === 'food' ? clean($('#foodText').value) : '';
@@ -785,8 +775,6 @@ function saveEntry(e) {
     form.stravaId = null;
     render();
   }
-  const note = harvardNote();
-  if (note) enqueue({ op: 'add', date: state.date, slot: 'COMENT', line: note });
   if (slot.kind === 'food') rememberRecent(slot.key, clean($('#foodText').value));
   rememberOtherOptions(slot.kind);
   if (ACTIVITY_FIELDS[slot.kind]) store.set('mode:' + slot.key, form.mode);
@@ -1862,7 +1850,6 @@ function init() {
     form.lineDirty = false;
     updateLine();
   });
-  $('#harvardOn').addEventListener('change', updateLine);
   $('#searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } });
   $('#favBtn').addEventListener('click', () => {
     const key = form.slot.key;
