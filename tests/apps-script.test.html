@@ -47,7 +47,7 @@ window.UrlFetchApp = { fetch(url, opts = {}) {
 } };
 window.ContentService = { createTextOutput: s => ({ s, setMimeType() { return JSON.parse(s); } }), MimeType: {} };
 window.Logger = { log() {} };
-window.LockService = { getDocumentLock: () => ({ waitLock() {}, releaseLock() {} }) };
+window.LockService = { getDocumentLock: () => (window.noDocLock ? null : { waitLock() {}, releaseLock() {} }), getScriptLock: () => ({ waitLock() { window.scriptLockUsed = true; }, releaseLock() {} }) };
 const props = { API_TOKEN: 'secreto' };
 window.PropertiesService = { getScriptProperties: () => ({ getProperty: k => props[k] ?? null, setProperty: (k, v) => { props[k] = v; }, deleteProperty: k => { delete props[k]; }, getProperties: () => ({ ...props }), setProperties: o => { Object.assign(props, o); } }) };
 
@@ -260,13 +260,16 @@ function eq(name, got, want) {
     // Script aparte: la hoja buena por SHEET_ID y los ajustes desde la de prueba (AJUSTES_DESDE)
     const prueba = [fakeTab('AJUSTES_APP')]; prueba[0].cells = exported;
     const opened = [];
-    window.SpreadsheetApp = { getActiveSpreadsheet: () => null, openById: id => { opened.push(id);
+    window.SpreadsheetApp = { flush() {}, getActiveSpreadsheet: () => null, openById: id => { opened.push(id);
       const list = id === 'PRUEBA123' ? prueba : sheets;
       return { getSheets: () => list, getSpreadsheetTimeZone: () => 'Europe/Madrid', deleteSheet: t => list.splice(list.indexOf(t), 1) }; } };
     eq('ID desde la URL de la hoja', [sheetId_('https://docs.google.com/spreadsheets/d/AbC-12_x/edit#gid=0'), sheetId_(' AbC ')], ['AbC-12_x', 'AbC']);
     let err = ''; try { ss_(); } catch (e) { err = e.message; }
     eq('sin SHEET_ID en un script aparte avisa', /SHEET_ID/.test(err), true);
     props.SHEET_ID = 'https://docs.google.com/spreadsheets/d/BUENA9/edit';
+    window.noDocLock = true;
+    eq('script aparte puede escribir (bloqueo del script)', (r => [r.ok && r.results[0].ok, !!window.scriptLockUsed, r.error || ''])(call({ action: 'add', entries: [{ id: 'lock1', date: '2026-11-14', slot: 'MER', line: '17:00 Pera' }] })), [true, true, '']);
+    window.noDocLock = false;
     eq('script aparte lee la hoja por su ID', [call({ action: 'day', date: '2026-11-14' }).ok, opened.pop()], [true, 'BUENA9']);
     for (const k of ['PRESETS_COM', 'DICT_CUSTOM', 'GROUP_OVERRIDES']) delete props[k];
     props.AJUSTES_DESDE = 'https://docs.google.com/spreadsheets/d/PRUEBA123/edit';

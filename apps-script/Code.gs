@@ -32,7 +32,7 @@ var SLOT_HEADERS = {
 };
 
 // Súbelo cada vez que cambies este archivo: la app lo muestra en Ajustes → Versión.
-var SCRIPT_VERSION = 8;
+var SCRIPT_VERSION = 9;
 
 var HEADER_ROW = 2;
 var FIRST_DAY_ROW = 3;
@@ -110,7 +110,8 @@ function checkToken_(token) {
 }
 
 function withLock_(fn) {
-  var lock = LockService.getDocumentLock();
+  // En un script aparte (sin hoja contenedora) no hay bloqueo de documento: se usa el del script.
+  var lock = LockService.getDocumentLock() || LockService.getScriptLock();
   lock.waitLock(20000);
   try {
     var result = fn();
