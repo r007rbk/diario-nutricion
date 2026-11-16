@@ -1,7 +1,7 @@
 // Guarda la app en el móvil para que abra sin conexión.
 // Sube VERSION cada vez que cambies un archivo de la app.
-const VERSION = 'diario-v9';
-const FILES = ['./', 'index.html', 'styles.css?v=9', 'plan.js?v=9', 'app.js?v=9', 'manifest.webmanifest',
+const VERSION = 'diario-v10';
+const FILES = ['./', 'index.html', 'styles.css?v=10', 'plan.js?v=10', 'app.js?v=10', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/apple-touch-icon.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', e => {

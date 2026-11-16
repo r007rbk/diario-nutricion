@@ -2,7 +2,7 @@
 // sin Google. Uso (consola de la app): await import('/tests/mock-backend.js')
 // y en Ajustes URL = https://mock/exec, token = secreto.
 // window.mockOnline = false simula estar sin conexión.
-const code = await (await fetch('/apps-script/Code.gs')).text();
+const code = await (await fetch('/apps-script/Code.gs', { cache: 'no-store' })).text();
 const fixture = await (await fetch('/tests/fixture.json')).json();
 const toVal = v => (v && typeof v === 'object' && v.date)
   ? new Date(+v.date.slice(0, 4), +v.date.slice(5, 7) - 1, +v.date.slice(8, 10)) : (v ?? '');

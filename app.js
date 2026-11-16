@@ -1,7 +1,9 @@
 'use strict';
 
 // Cambia junto con ?v= en index.html y VERSION en sw.js.
-const APP_VERSION = 9;
+const APP_VERSION = 10;
+// Versión del script de Google que necesita esta app (solo cambia cuando cambia Code.gs).
+const SCRIPT_REQUIRED = 7;
 
 // Si algo falla, que se vea en pantalla en lugar de no hacer nada.
 window.addEventListener('error', e => toast(`Error: ${e.message}`));
@@ -1306,7 +1308,7 @@ function renderConfig() {
   $('#settingsStatus').textContent = state.lastError ? `Último error: ${state.lastError}` : '';
   $('#appVersion').textContent = `App: versión ${APP_VERSION}`;
   $('#scriptVersion').textContent = state.scriptVersion
-    ? `Script de Google: versión ${state.scriptVersion}${state.scriptVersion < APP_VERSION ? ' ⚠︎ actualízalo (Implementar → Nueva versión)' : ''}`
+    ? `Script de Google: versión ${state.scriptVersion}${state.scriptVersion < SCRIPT_REQUIRED ? ' ⚠︎ actualízalo (Implementar → Nueva versión)' : ''}`
     : 'Script de Google: sin datos (conéctate para comprobarlo)';
   renderSync();
   renderPresetEditor();

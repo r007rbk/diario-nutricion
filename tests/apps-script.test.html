@@ -46,9 +46,10 @@ window.UrlFetchApp = { fetch(url, opts = {}) {
   return reply(404, {});
 } };
 window.ContentService = { createTextOutput: s => ({ s, setMimeType() { return JSON.parse(s); } }), MimeType: {} };
+window.Logger = { log() {} };
 window.LockService = { getDocumentLock: () => ({ waitLock() {}, releaseLock() {} }) };
 const props = { API_TOKEN: 'secreto' };
-window.PropertiesService = { getScriptProperties: () => ({ getProperty: k => props[k] ?? null, setProperty: (k, v) => { props[k] = v; }, deleteProperty: k => { delete props[k]; }, getProperties: () => ({ ...props }) }) };
+window.PropertiesService = { getScriptProperties: () => ({ getProperty: k => props[k] ?? null, setProperty: (k, v) => { props[k] = v; }, deleteProperty: k => { delete props[k]; }, getProperties: () => ({ ...props }), setProperties: o => { Object.assign(props, o); } }) };
 
 const results = [];
 function eq(name, got, want) {
@@ -57,9 +58,9 @@ function eq(name, got, want) {
 }
 
 (async () => {
-  const code = await (await fetch('../apps-script/Code.gs')).text();
+  const code = await (await fetch('../apps-script/Code.gs', { cache: 'no-store' })).text();
   (0, eval)(code);
-  const fixture = await (await fetch('fixture.json')).json();
+  const fixture = await (await fetch('fixture.json', { cache: 'no-store' })).json();
   const sheets = Object.entries(fixture).map(([n, r]) => makeSheet(n, r));
   window.SpreadsheetApp = {
     getActiveSpreadsheet: () => ({ getSheets: () => sheets, getSpreadsheetTimeZone: () => 'Europe/Madrid' }),
@@ -231,6 +232,33 @@ function eq(name, got, want) {
   eq('Natalbel es suplemento, no comida', [top('DES', 'suplementos', 5).includes('Natalbel'), h.DES.items.some(r => /natalbel/i.test(r[0]))], [true, false]);
   eq('uso reciente (30 días) en cada sugerencia', h.DES.items.every(r => r.length === 3 && typeof r[2] === 'number'), true);
   eq('agua es bebida en la comida', top('COM', 'bebidas', 3).some(b => /^agua$/i.test(b)), true);
+
+  // ── Pasar ajustes de la hoja de prueba a la buena ──
+  {
+    const tabs = [];
+    const fakeTab = name => {
+      const t = { name, cells: [], getName: () => t.name, clear() { t.cells = []; },
+        getRange: (r, c, n) => ({ setNumberFormat() { return this; }, setValues(v) { t.cells = v.map(x => x.slice()); } }),
+        getDataRange: () => ({ getValues: () => t.cells.map(x => x.slice()) }) };
+      return t;
+    };
+    const saved = window.SpreadsheetApp;
+    window.SpreadsheetApp = { getActiveSpreadsheet: () => ({
+      getSheets: () => tabs, getSheetByName: n => tabs.find(t => t.name === n) || null,
+      insertSheet: n => { const t = fakeTab(n); tabs.push(t); return t; },
+      deleteSheet: t => tabs.splice(tabs.indexOf(t), 1) }) };
+    props.PRESETS_COM = '{"items":["Paella"]}'; props.DICT_CUSTOM = '{"add":{}}'; props.GROUP_OVERRIDES = '{"x":["CHO"]}';
+    props.STRAVA_REFRESH_TOKEN = 'R1';
+    exportarAjustes();
+    eq('exporta botones, diccionario y correcciones, sin token ni Strava', tabs[0].cells.map(r => r[0]), ['DICT_CUSTOM', 'GROUP_OVERRIDES', 'PRESETS_COM']);
+    const exported = tabs[0].cells;
+    for (const k of ['PRESETS_COM', 'DICT_CUSTOM', 'GROUP_OVERRIDES', 'STRAVA_REFRESH_TOKEN']) delete props[k];
+    tabs.length = 0;
+    const copy = fakeTab('Copia de AJUSTES_APP'); copy.cells = exported; tabs.push(copy);
+    importarAjustes();
+    eq('importa en la hoja buena y borra la pestaña', [props.PRESETS_COM, props.GROUP_OVERRIDES, props.API_TOKEN, tabs.length], ['{"items":["Paella"]}', '{"x":["CHO"]}', 'secreto', 0]);
+    window.SpreadsheetApp = saved;
+  }
 
   document.getElementById('out').textContent = results.join('\n');
 })().catch(e => { document.getElementById('out').textContent = 'ERROR ' + e.stack; });
