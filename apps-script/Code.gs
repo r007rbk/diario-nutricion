@@ -32,7 +32,7 @@ var SLOT_HEADERS = {
 };
 
 // Súbelo cada vez que cambies este archivo: la app lo muestra en Ajustes → Versión.
-var SCRIPT_VERSION = 7;
+var SCRIPT_VERSION = 8;
 
 var HEADER_ROW = 2;
 var FIRST_DAY_ROW = 3;
@@ -60,7 +60,7 @@ function doPost(e) {
 function handle_(req) {
   try {
     checkToken_(req.token);
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var ss = ss_();
     switch (req.action) {
       case 'ping':
         return json_({ ok: true, sheets: listSeasons_(ss), version: SCRIPT_VERSION });
@@ -397,6 +397,24 @@ var STRAVA_NEARBY_MIN = 30;         // si ya hay algo registrado ±30 min, no se
 
 function props_() { return PropertiesService.getScriptProperties(); }
 
+/**
+ * La hoja del diario. Si el script está dentro de la hoja, es esa. Si es un script
+ * aparte (hoja compartida contigo, de la que no eres dueña), la de la propiedad SHEET_ID,
+ * que puede ser la URL de la hoja o solo su ID.
+ */
+function ss_() {
+  var id = props_().getProperty('SHEET_ID');
+  if (id) return SpreadsheetApp.openById(sheetId_(id));
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw new Error('Falta la propiedad de script SHEET_ID (la URL o el ID de la hoja).');
+  return ss;
+}
+
+function sheetId_(v) {
+  var m = String(v).match(/\/d\/([a-zA-Z0-9_-]+)/);
+  return m ? m[1] : String(v).trim();
+}
+
 function stravaSettings_() {
   try { return JSON.parse(props_().getProperty('STRAVA_SETTINGS') || '{}'); } catch (e) { return {}; }
 }
@@ -548,7 +566,7 @@ function stravaSync_(ss) {
 /** Para un activador por horas (Activadores → stravaSincronizar): solo tiene efecto con "escribir solo". */
 function stravaSincronizar() {
   if (!stravaStatus_().auto) return;
-  stravaSync_(SpreadsheetApp.getActiveSpreadsheet());
+  stravaSync_(ss_());
 }
 
 function stravaDisconnect_() {
@@ -833,7 +851,7 @@ function buildHistory(cells, todayIso) {
 
 /** Ejecútala una vez desde el editor para comprobar que encuentra el día de hoy. */
 function probarHoy() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = ss_();
   var hoy = Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd');
   Logger.log(JSON.stringify(readDay_(ss, hoy), null, 2));
 }
@@ -850,7 +868,7 @@ function exportarAjustes() {
   var rows = Object.keys(props).filter(function (k) { return EXPORT_NAME_RE.test(k); }).sort()
     .map(function (k) { return [k, props[k]]; });
   if (!rows.length) { Logger.log('No hay ajustes que exportar.'); return; }
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = ss_();
   var sh = ss.getSheetByName(EXPORT_TAB) || ss.insertSheet(EXPORT_TAB);
   sh.clear();
   sh.getRange(1, 1, rows.length, 2).setNumberFormat('@').setValues(rows);
@@ -858,11 +876,16 @@ function exportarAjustes() {
     rows.map(function (r) { return r[0]; }).join(', '));
 }
 
-/** En la hoja buena, después de copiar allí la pestaña: carga los ajustes y borra la pestaña. */
+/**
+ * En el script de la hoja buena: carga los ajustes y borra la pestaña AJUSTES_APP.
+ * La pestaña se busca en la hoja de la propiedad AJUSTES_DESDE (URL de la hoja de prueba)
+ * o, si no está, en la propia hoja del diario.
+ */
 function importarAjustes() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var from = props_().getProperty('AJUSTES_DESDE');
+  var ss = from ? SpreadsheetApp.openById(sheetId_(from)) : ss_();
   var sh = ss.getSheets().filter(function (s) { return s.getName().indexOf(EXPORT_TAB) >= 0; })[0];
-  if (!sh) throw new Error('No encuentro la pestaña ' + EXPORT_TAB + '. Cópiala primero desde la hoja de prueba.');
+  if (!sh) throw new Error('No encuentro la pestaña ' + EXPORT_TAB + '. Ejecuta antes exportarAjustes en la hoja de prueba.');
   var props = {};
   sh.getDataRange().getValues().forEach(function (r) {
     var k = String(r[0]).trim();
