@@ -1,7 +1,7 @@
 'use strict';
 
 // Cambia junto con ?v= en index.html y VERSION en sw.js.
-const APP_VERSION = 11;
+const APP_VERSION = 12;
 // Versión del script de Google que necesita esta app (solo cambia cuando cambia Code.gs).
 const SCRIPT_REQUIRED = 7;
 
@@ -147,6 +147,7 @@ const state = {
   config: store.get('config', null),      // listas de botones y diccionario (guardado en el script)
   configLoaded: !!store.get('config', null),
   scriptVersion: null,
+  progress: { period: 'week', anchor: null },
   strava: store.get('strava', { status: null, pending: [], at: 0 }),
   view: store.get('view', 'register'),
   weekStart: null,
@@ -272,6 +273,7 @@ function render() {
   if (state.view === 'plan') { renderPlan(); renderSync(); return; }
   if (state.view === 'config') { renderSync(); return; }
   if (state.view === 'eat') { renderEat(); renderSync(); return; }
+  if (state.view === 'progress') { renderProgress(); renderSync(); return; }
   const d = parseIso(state.date);
   const isToday = state.date === isoDate(new Date());
   $('#dateText').textContent = `${isToday ? 'Hoy, ' : ''}${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
@@ -865,7 +867,7 @@ async function loadWeek(start, force) {
     store.set('overrides', state.overrides);
     store.set('weekAt:' + start, Date.now());
     if (state.view === 'plan') renderPlan();
-    else render();
+    else if (state.view !== 'progress') render();
     if ($('#entrySheet').open && form.slot && form.slot.kind === 'food') { renderPlanBlock(); updateLine(); }
   } catch (err) {
     state.lastError = err.message;
@@ -1039,6 +1041,7 @@ function switchView(view) {
   $('#planView').hidden = view !== 'plan';
   $('#configView').hidden = view !== 'config';
   $('#eatView').hidden = view !== 'eat';
+  $('#progressView').hidden = view !== 'progress';
   document.body.dataset.view = view;
   document.querySelectorAll('.tabbar button').forEach(b => b.classList.toggle('on', b.dataset.view === view));
   window.scrollTo(0, 0);
@@ -1046,6 +1049,11 @@ function switchView(view) {
     if (!state.weekStart) state.weekStart = mondayOf(state.date);
     renderPlan();
     loadWeek(state.weekStart);
+  } else if (view === 'progress') {
+    if (!state.progress.anchor) state.progress.anchor = todayIso();
+    $('#goToday').hidden = true;
+    renderProgress();
+    loadProgressData();
   } else if (view === 'eat') {
     renderEat();
     loadWeek(mondayOf(state.date));
@@ -1201,6 +1209,233 @@ function renderTodayPlan() {
   const parts = missing.map(g => `${GROUP[g].icon}${day.target[g] - (day.actual[g] || 0) > 1 ? '×' + (day.target[g] - (day.actual[g] || 0)) : ''}`);
   btn.textContent = `📋 Falta hoy: ${parts.join(' ')}` + (pend.length ? ` · pendiente: ${pend.map(g => GROUP[g].icon).join(' ')}` : '');
   btn.className = 'today-plan';
+}
+
+// ───────────────────────── Progreso (semana, mes, año) ─────────────────────────
+
+const PROGRESS_SINCE_DEFAULT = '2026-11-17';   // inicio del esquema de menú ideal actual
+const progressSince = () => store.get('progressSince', PROGRESS_SINCE_DEFAULT);
+const MONTHS_LONG = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const LEVEL_TEXT = { good: 'bien', mid: 'regular', bad: 'mal', todo: 'pendiente', none: 'sin datos', off: 'antes del esquema actual' };
+
+/** Plato Harvard de una celda del Sheet: parte que cumple (0..1). */
+function harvardScore(text) {
+  const drinks = (String(text).match(/bebidas?\s*:\s*([^.\n]*)/i) || [])[1] || '';
+  const r = harvardAuto(text, drinks);
+  return HARVARD.filter(h => r[h.key]).length / HARVARD.length;
+}
+
+/** Nota de cada día en [from, to] (ISO), con el esquema actual. */
+function progressDays(from, to) {
+  const scheme = currentScheme();
+  const today = todayIso();
+  const since = progressSince();
+  const out = [];
+  for (let d = from; d <= to; d = addDays(d, 1)) {
+    const view = viewDay(d);
+    if (d < since || d > today || !scheme) { out.push({ date: d, off: d < since, future: d > today, known: view.known }); continue; }
+    const trained = !!((view.slots.ENT || '').trim() || (view.slots.GYM || '').trim());
+    const ev = evaluateDay(scheme[weekdayIndex(d)], view.slots, state.overrides, trained);
+    const sc = scoreDay(ev, view.slots, d === today ? 'today' : 'past', harvardScore);
+    out.push({ date: d, known: view.known, ...sc });
+  }
+  return out;
+}
+
+function progressRange() {
+  const p = state.progress;
+  const a = parseIso(p.anchor);
+  if (p.period === 'week') { const from = mondayOf(p.anchor); return { from, to: addDays(from, 6) }; }
+  if (p.period === 'month') {
+    return { from: isoDate(new Date(a.getFullYear(), a.getMonth(), 1)), to: isoDate(new Date(a.getFullYear(), a.getMonth() + 1, 0)) };
+  }
+  return { from: `${a.getFullYear()}-01-01`, to: `${a.getFullYear()}-12-31` };
+}
+
+function progressLabel() {
+  const p = state.progress;
+  const a = parseIso(p.anchor);
+  if (p.period === 'week') return weekLabel(mondayOf(p.anchor));
+  if (p.period === 'month') return `${capFirst(MONTHS_LONG[a.getMonth()])} ${a.getFullYear()}`;
+  return `Año ${a.getFullYear()}`;
+}
+
+function stepProgress(n) {
+  const p = state.progress;
+  const a = parseIso(p.anchor);
+  if (p.period === 'week') p.anchor = addDays(p.anchor, 7 * n);
+  else if (p.period === 'month') p.anchor = isoDate(new Date(a.getFullYear(), a.getMonth() + n, 1));
+  else p.anchor = `${a.getFullYear() + n}-01-01`;
+  renderProgress();
+  loadProgressData();
+}
+
+/** Descarga las semanas que faltan (solo desde el inicio del esquema y hasta hoy). */
+let progressLoading = false;
+async function loadProgressData() {
+  if (progressLoading || !state.settings.url) return;
+  const { from, to } = progressRange();
+  const start = from < progressSince() ? progressSince() : from;
+  const end = to > todayIso() ? todayIso() : to;
+  if (start > end) return;
+  const recent = addDays(todayIso(), -14);
+  const weeks = [];
+  for (let m = mondayOf(start); m <= end; m = addDays(m, 7)) {
+    const have = [0, 1, 2, 3, 4, 5, 6].every(i => dayCache(addDays(m, i)) || addDays(m, i) > todayIso());
+    // Las semanas recientes se refrescan; las antiguas, solo si faltan días.
+    if (!have || addDays(m, 6) >= recent) weeks.push(m);
+  }
+  if (!weeks.length) return;
+  progressLoading = true;
+  try {
+    for (const m of weeks) {
+      await loadWeek(m, !dayCache(m));
+      if (state.view === 'progress') renderProgress();
+    }
+  } finally {
+    progressLoading = false;
+  }
+}
+
+function pcell(level, title, onClick) {
+  const c = document.createElement(onClick ? 'button' : 'span');
+  if (onClick) { c.type = 'button'; c.addEventListener('click', onClick); }
+  c.className = 'pcell ' + level;
+  c.title = title;
+  c.setAttribute('aria-label', title);
+  return c;
+}
+
+const pct = s => (s == null ? '' : `${Math.floor(s * 100 + 1e-9)} %`);
+const avg = list => { const v = list.filter(x => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+
+/** Abre el Menú ideal de la semana de ese día. */
+function openDayInPlan(date) {
+  state.date = date;
+  state.weekStart = mondayOf(date);
+  switchView('plan');
+}
+
+function renderProgress() {
+  const p = state.progress;
+  $('#dateText').textContent = progressLabel();
+  $('#dateInput').value = p.anchor;
+  document.querySelectorAll('#progressSeg button').forEach(b => b.classList.toggle('on', b.dataset.p === p.period));
+  $('#progressSince').value = progressSince();
+  const card = $('#progressCard');
+  card.innerHTML = '';
+  if (!currentScheme()) {
+    card.innerHTML = `<p class="hint">${state.settings.url ? 'Cargando el menú ideal…' : 'Configura la conexión en Ajustes.'}</p>`;
+    return;
+  }
+  const { from, to } = progressRange();
+  const days = progressDays(from, to);
+  const dayTitle = d => {
+    const x = parseIso(d.date);
+    const when = `${WEEKDAYS[x.getDay()]} ${x.getDate()} ${MONTHS[x.getMonth()]}`;
+    if (d.off) return `${when}: ${LEVEL_TEXT.off}`;
+    if (d.future || !d.day) return `${when}: —`;
+    return `${when}: ${LEVEL_TEXT[d.day.level]}${d.day.score != null ? ' · ' + pct(d.day.score) : ''}`;
+  };
+  const levelOfDay = d => (d.off ? 'off' : d.future || !d.day ? 'future' : !d.known && d.day.level === 'none' ? 'loading' : d.day.level);
+  const scored = days.filter(d => d.day && d.day.score != null);
+  const total = avg(scored.map(d => d.day.score));
+
+  const head = document.createElement('div');
+  head.className = 'progress-head';
+  head.innerHTML = `<h2></h2><span class="pbadge"></span>`;
+  head.querySelector('h2').textContent = progressLabel();
+  const badge = head.querySelector('.pbadge');
+  badge.textContent = total == null ? 'sin datos' : `${pct(total)} · ${LEVEL_TEXT[levelOf(total)]}`;
+  badge.classList.add(total == null ? 'none' : levelOf(total));
+  card.appendChild(head);
+
+  if (p.period === 'year') {
+    // 12 filas (meses) × 31 días: el color del día; a la derecha, la media del mes.
+    const grid = document.createElement('div');
+    grid.className = 'pgrid year';
+    const y = parseIso(from).getFullYear();
+    for (let m = 0; m < 12; m++) {
+      const label = document.createElement('span');
+      label.className = 'plabel';
+      label.textContent = capFirst(MONTHS[m]);
+      grid.appendChild(label);
+      const strip = document.createElement('div');
+      strip.className = 'pstrip';
+      const monthDays = days.filter(d => parseIso(d.date).getMonth() === m && parseIso(d.date).getFullYear() === y);
+      monthDays.forEach(d => strip.appendChild(pcell(levelOfDay(d), dayTitle(d), d.off || d.future ? null : () => openDayInPlan(d.date))));
+      for (let i = monthDays.length; i < 31; i++) strip.appendChild(pcell('blank', ''));
+      grid.appendChild(strip);
+      const mAvg = avg(monthDays.filter(d => d.day).map(d => d.day.score));
+      const v = document.createElement('span');
+      v.className = 'pval ' + (mAvg == null ? '' : levelOf(mAvg));
+      v.textContent = mAvg == null ? '' : pct(mAvg);
+      grid.appendChild(v);
+    }
+    card.appendChild(grid);
+    return;
+  }
+
+  // Semana y mes: una línea por comida, un cuadro por día; abajo, el día entero.
+  const grid = document.createElement('div');
+  grid.className = 'pgrid ' + p.period;
+  grid.style.setProperty('--n', days.length);
+  // Cabecera: inicial del día (semana) o número cada 5 días (mes)
+  grid.appendChild(Object.assign(document.createElement('span'), { className: 'plabel' }));
+  const hdr = document.createElement('div');
+  hdr.className = 'pstrip phead';
+  days.forEach((d, i) => {
+    const x = parseIso(d.date);
+    const t = document.createElement('span');
+    t.textContent = p.period === 'week' ? `${WEEKDAYS[x.getDay()].charAt(0).toUpperCase()}${x.getDate()}` : (i === 0 || (i + 1) % 5 === 0 ? String(x.getDate()) : '');
+    if (d.date === todayIso()) t.className = 'today';
+    hdr.appendChild(t);
+  });
+  grid.appendChild(hdr);
+  grid.appendChild(document.createElement('span'));
+
+  const addRow = (labelText, cellOf, valueOf, cls = '') => {
+    const label = document.createElement('span');
+    label.className = 'plabel ' + cls;
+    label.textContent = labelText;
+    grid.appendChild(label);
+    const strip = document.createElement('div');
+    strip.className = 'pstrip ' + cls;
+    days.forEach(d => strip.appendChild(cellOf(d)));
+    grid.appendChild(strip);
+    const v = valueOf();
+    const val = document.createElement('span');
+    val.className = 'pval ' + (v == null ? '' : levelOf(v));
+    val.textContent = v == null ? '' : pct(v);
+    grid.appendChild(val);
+  };
+  PROGRESS_ROWS.forEach(row => {
+    // Post-entreno solo si algún día del periodo lo pedía o lo registraste.
+    if (row.key === 'DE' && !days.some(d => d.rows && d.rows.DE.level !== 'none')) return;
+    addRow(row.label, d => {
+      if (!d.rows) return pcell(levelOfDay(d), dayTitle(d));
+      const r = d.rows[row.key];
+      const lvl = !d.known && r.level === 'none' ? 'loading' : r.level;
+      let title = `${dayTitle(d).split(':')[0]} · ${row.label}: ${LEVEL_TEXT[r.level]}`;
+      if (r.score != null) title += ` · ${pct(r.score)}`;
+      if (r.missingGroups && r.missingGroups.length) title += ` · falta ${r.missingGroups.map(g => GROUP[g].label.toLowerCase()).join(', ')}`;
+      if (r.harvard != null) title += ` · Harvard ${Math.round(r.harvard * 5)}/5`;
+      if (row.key === 'ENT' && r.text) title += ` · ${r.text}`;
+      return pcell(lvl, title, () => openDayInPlan(d.date));
+    }, () => row.key === 'ENT'
+      ? null
+      : avg(days.filter(d => d.rows && d.rows[row.key].score != null).map(d => d.rows[row.key].score)));
+  });
+  addRow('Día', d => pcell(levelOfDay(d), dayTitle(d), d.off || d.future ? null : () => openDayInPlan(d.date)), () => total, 'pday');
+  card.appendChild(grid);
+
+  // Entrenos del periodo
+  const trainedDays = days.filter(d => d.rows && d.rows.ENT.level === 'good').length;
+  const counted = days.filter(d => d.rows).length;
+  const foot = document.createElement('p');
+  foot.className = 'hint';
+  foot.textContent = counted ? `Entrenaste ${trainedDays} de ${counted} días. Toca un cuadro para ver ese día en el Menú ideal.` : 'Aún no hay días valorados en este periodo.';
+  card.appendChild(foot);
 }
 
 // ───────────────────────── Configuración guardada en el script ─────────────────────────
@@ -1785,6 +2020,7 @@ async function disconnectStrava() {
 function init() {
   const step = n => {
     if (state.view === 'plan') { state.weekStart = addDays(state.weekStart, 7 * n); renderPlan(); loadWeek(state.weekStart); }
+    else if (state.view === 'progress') stepProgress(n);
     else setDate(addDays(state.date, n));
   };
   $('#prevDay').addEventListener('click', () => step(-1));
@@ -1793,6 +2029,17 @@ function init() {
     if (b.dataset.view === 'plan') state.weekStart = mondayOf(state.date);
     switchView(b.dataset.view);
   }));
+  document.querySelectorAll('#progressSeg button').forEach(b => b.addEventListener('click', () => {
+    state.progress.period = b.dataset.p;
+    renderProgress();
+    loadProgressData();
+  }));
+  $('#progressSince').addEventListener('change', e => {
+    if (!e.target.value) return;
+    store.set('progressSince', e.target.value);
+    renderProgress();
+    loadProgressData();
+  });
   $('#fixGroupsBtn').addEventListener('click', () => openGroupsEditor(clean($('#foodText').value), () => { renderDetected(); renderPlanBlock(); }));
   $('#groupsForm').addEventListener('submit', saveGroups);
   $('#presetAddForm').addEventListener('submit', addPreset);
@@ -1807,6 +2054,7 @@ function init() {
   $('#dateInput').addEventListener('change', e => {
     if (!e.target.value) return;
     if (state.view === 'plan') { state.weekStart = mondayOf(e.target.value); state.date = e.target.value; renderPlan(); loadWeek(state.weekStart); }
+    else if (state.view === 'progress') { state.progress.anchor = e.target.value; renderProgress(); loadProgressData(); }
     else setDate(e.target.value);
   });
   $('#dateLabel').addEventListener('click', () => {

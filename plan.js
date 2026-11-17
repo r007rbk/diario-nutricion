@@ -357,6 +357,62 @@ function suggestGroups(week, date, slot) {
   return out;
 }
 
+// ───────────────────────── Progreso ─────────────────────────
+
+/** Filas de la pantalla Progreso. En desayuno, comida y cena también cuenta el plato Harvard. */
+const PROGRESS_ROWS = [
+  { key: 'DES', label: 'Desayuno', harvard: true },
+  { key: 'MM1', label: 'M. mañana' },
+  { key: 'COM', label: 'Comida', harvard: true },
+  { key: 'MER', label: 'Merienda' },
+  { key: 'CEN', label: 'Cena', harvard: true },
+  { key: 'DE', label: 'Post-entreno' },
+  { key: 'ENT', label: 'Entreno' }
+];
+const levelOf = s => (s >= 0.85 ? 'good' : s >= 0.6 ? 'mid' : 'bad');
+
+/**
+ * Nota de un día. ev = evaluateDay(...); slots = celdas del día; status = past|today|future.
+ * harvardFn(texto) → 0..1 (parte del plato Harvard que cumple).
+ * Cada comida: lo que pedía el menú ideal que sí aparece (0..1), y en las principales,
+ * la media con el Harvard. Sin registro: mal si tocaba y el día ya pasó; pendiente si es hoy.
+ * Entreno: bien si hay entreno o gym; si no, neutro (no penaliza).
+ * Día sin nada registrado: sin datos.
+ * Devuelve { rows: {DES: {level, score, …}}, day: {level, score} }; level = good|mid|bad|todo|none.
+ */
+function scoreDay(ev, slots, status, harvardFn) {
+  const rows = {};
+  const scores = [];
+  const anyFood = PROGRESS_ROWS.some(r => r.key !== 'ENT' && String(slots[r.key] || '').trim());
+  for (const row of PROGRESS_ROWS) {
+    if (row.key === 'ENT') {
+      const t = [slots.ENT, slots.GYM].map(x => String(x || '').trim()).filter(Boolean).join(' · ');
+      rows.ENT = { level: t ? 'good' : 'none', text: t };
+      continue;
+    }
+    const text = String(slots[row.key] || '').trim();
+    const exp = ev.expectedSlots[row.key];
+    if (!text) {
+      if (!anyFood || !exp) rows[row.key] = { level: 'none' };
+      else if (status === 'past') { rows[row.key] = { level: 'bad', score: 0, missing: true }; scores.push(0); }
+      else rows[row.key] = { level: 'todo' };
+      continue;
+    }
+    const want = exp ? [...new Set(exp.groups.map(x => x.g))] : [];
+    const have = new Set((ev.meals[row.key] && ev.meals[row.key].groups) || []);
+    const menu = want.length ? want.filter(g => have.has(g)).length / want.length : 1;
+    const harvard = row.harvard && harvardFn ? harvardFn(text) : null;
+    const score = harvard == null ? menu : (menu + harvard) / 2;
+    rows[row.key] = { level: levelOf(score), score, menu, harvard, missingGroups: want.filter(g => !have.has(g)) };
+    scores.push(score);
+  }
+  const day = scores.length
+    ? { score: scores.reduce((a, b) => a + b, 0) / scores.length }
+    : { score: null };
+  day.level = day.score == null ? 'none' : levelOf(day.score);
+  return { rows, day };
+}
+
 // ───────────────────────── ¿Qué como? ─────────────────────────
 
 /**

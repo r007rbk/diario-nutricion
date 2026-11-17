@@ -12,7 +12,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="styles.css?v=11">
+  <link rel="stylesheet" href="styles.css?v=12">
 </head>
 <body>
   <header class="topbar">
@@ -60,6 +60,25 @@
   </main>
 
   <!-- Menú ideal: cumplimiento semanal -->
+  <main id="progressView" hidden>
+    <div class="seg tabs" id="progressSeg" role="tablist">
+      <button type="button" data-p="week" class="on">Semana</button>
+      <button type="button" data-p="month">Mes</button>
+      <button type="button" data-p="year">Año</button>
+    </div>
+    <section class="card" id="progressCard"></section>
+    <p class="legend">
+      <span class="pdot good"></span>Bien <span class="pdot mid"></span>Regular <span class="pdot bad"></span>Mal
+      <span class="pdot todo"></span>Pendiente hoy <span class="pdot none"></span>Sin datos
+    </p>
+    <section class="card progress-help">
+      <p class="hint">Cada comida se puntúa por lo que pedía el menú ideal que sí está registrado. En desayuno, comida y cena cuenta también el plato Harvard (mitad y mitad). Bien a partir del 85 %, regular del 60 %. Entreno: verde si entrenaste.</p>
+      <label class="field">Valorado desde (inicio del esquema actual)
+        <input type="date" id="progressSince">
+      </label>
+    </section>
+  </main>
+
   <main id="planView" hidden>
     <p class="hint plan-loading" id="planStatus"></p>
     <section class="card" id="pendingCard" hidden>
@@ -159,6 +178,7 @@
     <button type="button" data-view="register" class="on"><span>✏️</span>Registrar</button>
     <button type="button" data-view="eat"><span>🍽️</span>¿Qué como?</button>
     <button type="button" data-view="plan"><span>📋</span>Menú ideal</button>
+    <button type="button" data-view="progress"><span>📈</span>Progreso</button>
     <button type="button" data-view="config"><span>⚙️</span>Ajustes</button>
   </nav>
 
@@ -278,7 +298,7 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="plan.js?v=11"></script>
-  <script src="app.js?v=11"></script>
+  <script src="plan.js?v=12"></script>
+  <script src="app.js?v=12"></script>
 </body>
 </html>

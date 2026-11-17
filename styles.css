@@ -342,3 +342,47 @@ code { font-size: 12px; background: var(--bg); padding: 1px 4px; border-radius: 
 .harvard-items .chip { background: var(--card); }
 .harvard-items .chip.no { border-color: color-mix(in srgb, #d9534f 45%, var(--line)); color: var(--text); }
 .switch.small { font-size: 14px; }
+
+/* Progreso: líneas de color por comida y día */
+#progressView { display: flex; flex-direction: column; gap: 12px; }
+#progressView[hidden] { display: none; }
+#progressSeg { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 1fr; }
+:root { --p-good: #3aa55d; --p-mid: #e2a93b; --p-bad: #d9534f; --p-none: color-mix(in srgb, var(--line) 80%, var(--bg)); }
+.progress-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.progress-head h2 { margin: 0; font-size: 16px; }
+.pbadge { font-size: 13px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: var(--p-none); color: var(--text); }
+.pbadge.good { background: var(--p-good); color: #fff; }
+.pbadge.mid { background: var(--p-mid); color: #fff; }
+.pbadge.bad { background: var(--p-bad); color: #fff; }
+.pgrid { display: grid; grid-template-columns: 82px 1fr 38px; align-items: center; gap: 6px 6px; }
+.pgrid.year { grid-template-columns: 30px 1fr 38px; gap: 5px 6px; }
+.plabel { font-size: 12px; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plabel.pday { color: var(--text); }
+.pstrip { display: grid; grid-template-columns: repeat(var(--n, 31), 1fr); gap: 3px; }
+.pgrid.week .pstrip { gap: 5px; }
+.pgrid.month .pstrip { gap: 2px; }
+.pgrid.year .pstrip { grid-template-columns: repeat(31, 1fr); gap: 1.5px; }
+.pstrip.phead span { font-size: 10px; color: var(--muted); text-align: center; white-space: nowrap; }
+.pstrip.phead span.today { color: var(--accent); font-weight: 700; }
+.pcell { display: block; border: 0; padding: 0; height: 22px; border-radius: 5px; background: var(--p-none); }
+.pgrid.month .pcell { height: 20px; border-radius: 3px; }
+.pgrid.year .pcell { height: 14px; border-radius: 2px; }
+.pstrip.pday .pcell { height: 26px; }
+.pgrid.month .pstrip.pday .pcell { height: 24px; }
+.pcell.good { background: var(--p-good); }
+.pcell.mid { background: var(--p-mid); }
+.pcell.bad { background: var(--p-bad); }
+.pcell.todo { background: transparent; box-shadow: inset 0 0 0 1.5px var(--p-mid); }
+.pcell.none, .pcell.future { background: var(--p-none); opacity: .55; }
+.pcell.loading { background: var(--p-none); opacity: .35; }
+.pcell.off { background: repeating-linear-gradient(45deg, var(--p-none) 0 2px, transparent 2px 5px); opacity: .6; }
+.pcell.blank { background: transparent; }
+.pval { font-size: 11px; font-weight: 700; text-align: right; color: var(--muted); }
+.pval.good { color: var(--p-good); }
+.pval.mid { color: var(--p-mid); }
+.pval.bad { color: var(--p-bad); }
+.legend { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; color: var(--muted); }
+.pdot { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 3px; vertical-align: -1px; background: var(--p-none); }
+.pdot.good { background: var(--p-good); } .pdot.mid { background: var(--p-mid); } .pdot.bad { background: var(--p-bad); }
+.pdot.todo { background: transparent; box-shadow: inset 0 0 0 1.5px var(--p-mid); }
+.progress-help { display: flex; flex-direction: column; gap: 10px; }

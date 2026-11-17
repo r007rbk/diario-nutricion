@@ -15,6 +15,7 @@ Móvil (app web instalada)  ──►  Google Apps Script  ──►  celda del 
 - **Plato Harvard:** indica si la comida lo cumple y qué falta (solo informativo).
 - **Menú ideal:** compara lo registrado con el esquema de la hoja, por día y por semana.
 - **¿Qué como?:** propone comidas para cumplir el menú ideal.
+- **Progreso:** líneas de color por comida y día (bien, regular, mal) por semana, mes o año.
 - **Ajustes:** botones de comida y bebida, y diccionario de alimentos editables.
 - **Sin conexión:** los registros esperan en el móvil y se envían al recuperar la red.
 

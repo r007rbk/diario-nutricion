@@ -150,6 +150,24 @@ const groups = t => classifyMeal(t).groups;
     eq('nuevo: no se mezcla con la clasificación normal', groups('Merluza con verduras'), ['PESCADO', 'VERDURA']);
   }
 
+  // ── Progreso ──
+  {
+    const day = { slots: { DES: { groups: [{ g: 'FRUTA' }, { g: 'CHO' }, { g: 'LACTEO' }], training: false },
+      MM1: { groups: [{ g: 'FS' }, { g: 'FRUTA' }], training: false }, CEN: { groups: [{ g: 'VERDURA' }, { g: 'PESCADO' }], training: false } } };
+    const slots = { DES: '9:30 Café con leche, pan integral con tomate, plátano', CEN: '22:00 Pollo con patatas' };
+    const ev = evaluateDay(day, slots, {}, false);
+    const h = () => 0.6;
+    const past = scoreDay(ev, slots, 'past', h);
+    eq('progreso: desayuno completo + Harvard 3/5', [past.rows.DES.level, Math.round(past.rows.DES.score * 100)], ['mid', 80]);
+    eq('progreso: media mañana sin registrar el día pasado = mal', past.rows.MM1.level, 'bad');
+    eq('progreso: cena sin pescado ni verdura = mal', [past.rows.CEN.level, past.rows.CEN.missingGroups], ['bad', ['VERDURA', 'PESCADO']]);
+    eq('progreso: merienda sin esquema y vacía = neutro', past.rows.MER.level, 'none');
+    eq('progreso: hoy lo que falta está pendiente, no mal', scoreDay(ev, slots, 'today', h).rows.MM1.level, 'todo');
+    eq('progreso: entreno', [past.rows.ENT.level, scoreDay(ev, { ...slots, ENT: '20:00 Fuerza 1h' }, 'past', h).rows.ENT.level], ['none', 'good']);
+    eq('progreso: nota del día (media de comidas)', [Math.round(past.day.score * 100), past.day.level], [Math.round((0.8 + 0 + 0.3) / 3 * 100), 'bad']);
+    eq('progreso: día sin nada registrado = sin datos', [scoreDay(ev, {}, 'past', h).day.level, scoreDay(ev, {}, 'past', h).rows.DES.level], ['none', 'none']);
+  }
+
   document.getElementById('out').textContent = results.join('\n');
 })().catch(e => { document.getElementById('out').textContent = 'ERROR ' + e.stack; });
 </script>
