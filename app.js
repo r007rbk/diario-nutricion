@@ -1,7 +1,7 @@
 'use strict';
 
 // Cambia junto con ?v= en index.html y VERSION en sw.js.
-const APP_VERSION = 13;
+const APP_VERSION = 14;
 // Versión del script de Google que necesita esta app (solo cambia cuando cambia Code.gs).
 const SCRIPT_REQUIRED = 7;
 
@@ -38,7 +38,7 @@ const HARVARD = [
 
 // Valoración automática del plato Harvard a partir de lo escrito (sin acentos, minúsculas).
 const HARVARD_PROTEIN = ['PESCADO', 'LEGUMBRE', 'CARNE', 'HUEVO', 'FS'];
-const WHOLE_RE = /\b(integral(es)?|avena|quinoa|centeno|espelta|trigo sarraceno|mijo|bulgur|salvado)\b/;
+const WHOLE_RE = /\b(integral(es)?|avena|quinoa|centeno|espelta|trigo sarraceno|mijo|bulgur|salvado|weetabix)\b/;
 const OIL_RE = /\b(aceite|aove|oliva|alinad[ao]s?|alino)\b/;
 const SUGARY_RE = /\b(coca ?-?cola|fanta|refresco|zumo|batido|nestea|aquarius|tonica|red ?bull|monster|vino|cerveza|vermut|cava|sidra|copa|cubata|gin|ron|whisky|colacao|cola cao)\b/;
 const SUGAR_FREE_RE = /\b(zero|light|sin azucar|sin alcohol|0[.,]0|0)\b/;
@@ -1111,7 +1111,7 @@ function renderPlanBlock() {
     : 'Ya cubres lo que pide el menú ideal en esta comida.';
   if (!need.length) return;
   const h = state.history || {};
-  const pool = [...((h[slot.key] || {}).items || []), ...((h.ALL || {}).items || [])].map(r => r[0]);
+  const pool = [...((h[slot.key] || {}).items || []), ...((h.ALL || {}).items || [])].map(r => r[0]).concat(productsFor(slot.key));
   const seen = new Set();
   const typedKeys = new Set(listOf($('#foodText').value).map(keyOf));
   // Puntuación: lo pendiente de la semana vale el triple; cubrir varios grupos a la vez suma.
@@ -1728,11 +1728,11 @@ function mealCandidates(slotKey) {
   const h = state.history || {};
   const texts = [];
   const seen = new Set();
-  const add = (t, combo) => {
+  const add = (t, combo, product = false) => {
     const k = keyOf(t);
     if (!k || seen.has(k)) return;
     seen.add(k);
-    texts.push({ text: t, combo });
+    texts.push({ text: t, combo, product });
   };
   store.get('fav:' + slotKey, []).forEach(t => add(t, listOf(t).length > 1));
   ((h[slotKey] || {}).combos || []).forEach(r => add(r[0], true));
@@ -1740,6 +1740,7 @@ function mealCandidates(slotKey) {
   ((h[slotKey] || {}).items || []).forEach(r => add(r[0], false));
   ((h.ALL || {}).items || []).slice(0, 150).forEach(r => add(r[0], false));
   NUTRI.defaults.forEach(t => add(t, false));   // lo que recomienda la nutricionista, aunque no esté en el histórico
+  productsFor(slotKey).forEach(t => add(t, false, true));   // productos de Mercadona recomendados
   // Propuestas cortas y realistas: nada de ensaladas de seis ingredientes ni platos de restaurante.
   return texts
     .filter(c => c.text.length <= 60 && listOf(c.text).length <= 3)

@@ -184,6 +184,10 @@ const groups = t => classifyMeal(t).groups;
     eq('nutri: carne en la cena si el menú la pide', applyNutriPrefs(dinner, { slot: 'CEN', needed: new Set(['CARNE']) }).some(c => /Pollo/.test(c.text)), true);
     eq('nutri: cena alterna (ayer huevo → hoy pescado)', first([{ g: 'HUEVO', weight: 1 }, { g: 'PESCADO', weight: 2 }], dinner, { slot: 'CEN', dinnerPrefer: 'PESCADO', needed: new Set(['HUEVO', 'PESCADO']) })[0], 'Salmón a la plancha');
     eq('nutri: por la noche, tubérculos antes que HC integral', first([{ g: 'CHO' }], dinner, { slot: 'CEN', needed: new Set(['CHO']) }), ['Patata cocida']);
+    const prods = slot => productsFor(slot).map(t => ({ text: t, combo: false, groups: classifyMeal(t).groups }));
+    eq('mercadona: todos los productos se reconocen', NUTRI.products.filter(([t]) => !classifyMeal(t).groups.length).map(([t]) => t), []);
+    eq('mercadona: cena solo con productos = verdura + tubérculo + pescado azul', first([{ g: 'VERDURA' }, { g: 'CHO' }, { g: 'PESCADO' }], prods('CEN'), { slot: 'CEN', fishNote: 'azul', needed: new Set(['VERDURA', 'CHO', 'PESCADO']) }).every(t => !/integral|noodles|pasta/i.test(t)), true);
+    eq('mercadona: desayuno integral', productsFor('DES').every(t => /integral|weetabix|espelta|avena/i.test(t)), true);
     eq('nutri: a mediodía no cambia el cereal', first([{ g: 'CHO' }], C(['Arroz integral', 'Patata cocida']), { slot: 'COM' }), ['Arroz integral']);
   }
 

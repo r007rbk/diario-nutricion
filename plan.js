@@ -52,7 +52,7 @@ const DICTIONARY = {
     'cocido', 'falafel', 'tofu', 'azuki', 'guisante', 'habas', 'legumbre'],
   VERDURA: ['verdura', 'ensalada', 'lechuga', 'tomate', 'tomatito', 'tomates cherry', 'pimiento', 'cebolla', 'calabacin', 'berenjena', 'brocoli',
     'coliflor', 'espinaca', 'acelga', 'judias verdes', 'judia verde', 'zanahoria', 'pepino', 'rucula', 'champinon',
-    'seta', 'esparrago', 'alcachofa', 'puerro', 'calabaza', 'pisto', 'gazpacho', 'salmorejo', 'crema de', 'pure de',
+    'seta', 'esparrago', 'alcachofa', 'puerro', 'vichyssoise', 'menestra', 'jardinera', 'paisana', 'juliana', 'calabaza', 'pisto', 'gazpacho', 'salmorejo', 'crema de', 'pure de',
     'col ', 'coles ', 'repollo', 'canonigo', 'remolacha', 'apio', 'menestra', 'escarola', 'endibia', 'lombarda', 'kale',
     'pepinillo', 'piparra', 'rabano', 'aguacate', 'guacamole', 'cogollo', 'brotes', 'germinado', 'vainas', 'grelos',
     'borraja', 'cardo', 'nabo', 'hortaliza', 'pak choi', 'wok'],
@@ -70,7 +70,8 @@ const DICTIONARY = {
     'risotto', 'oatibix', 'biscote', 'picos', 'regaña', 'barrita', 'pad thai', 'ramen', 'canelon', 'raviol',
     'tortellini', 'bulgur', 'mijo', 'trigo', 'centeno', 'espelta', 'crepe', 'tortita de arroz', 'tarta', 'churro',
     'porra', 'mermelada', 'miel', 'pita', 'arepa', 'burrito', 'fajita', 'quesadilla', 'croqueta', 'sobao',
-    'polenta', 'tapioca', 'yuca', 'ensaladilla', 'harina', 'rebozado', 'empanado', 'gofre', 'tortilla de patata', 'patatas'],
+    'polenta', 'tapioca', 'yuca', 'ensaladilla', 'harina', 'rebozado', 'empanado', 'gofre', 'tortilla de patata', 'patatas',
+    'batata', 'weetabix', 'corn flakes', 'copos', 'vichyssoise'],
   FS: ['nuez', 'nueces', 'almendra', 'avellana', 'pistacho', 'anacardo', 'cacahuete', 'frutos secos', 'pipas',
     'piñones', 'pinones', 'macadamia', 'crema de cacahuete', 'semillas']
 };
@@ -431,10 +432,25 @@ const NUTRI = {
   blueFish: /\b(salmon|boquerone?s?|sardin\w*)\b/,          // pescado azul: salmón, boquerones, sardinillas
   whiteFish: /\b(merluza|bacalao|rape|lubina|dorada|lenguado|gallo|pescadilla|rodaballo|besugo|panga|perca|abadejo|corvina)\b/,
   dinnerProteins: ['HUEVO', 'PESCADO'],                      // cenas: alternar huevo y pescado
-  tubers: /\b(patatas?|boniatos?|batatas?|yuca|tuberculos?)\b/,   // por la noche, mejor tubérculos que HC integral
+  tubers: /\b(patatas?|boniatos?|batatas?|yuca|tuberculos?|vichyssoise)\b/,   // por la noche, mejor tubérculos que HC integral
   defaults: ['Nueces', 'Almendras', 'Avellanas', 'Salmón a la plancha', 'Boquerones', 'Sardinillas', 'Merluza a la plancha', 'Patata cocida', 'Boniato asado'],
-  bikeDuring: { food: '1 guayaba', drinks: 'bebida isotónica, agua', note: 'por cada hora de bici' }
+  bikeDuring: { food: '1 guayaba', drinks: 'bebida isotónica, agua', note: 'por cada hora de bici' },
+  // Productos de Mercadona recomendados, por comida en la que encajan.
+  products: [
+    ['Biscotes 100% integrales', 'DES'], ['Pan 100% integral', 'DES COM'], ['Panecillo 100% integral', 'DES COM'],
+    ['Weetabix', 'DES'], ['Copos de espelta', 'DES'], ['Avena crunchy', 'DES'],
+    ['Tortitas de legumbres', 'MM1 MER'], ['Mixbeans de edamame y soja', 'MM1 MER'],
+    ['Vasito de arroz integral', 'COM'], ['Vasito de quinoa integral', 'COM'], ['Noodles de arroz', 'COM'], ['Pasta de avena y maíz', 'COM'],
+    ['Verdura micro 3 vegetales', 'COM CEN'], ['Menestra de verduras', 'COM CEN'],
+    ['Mix jardinera de verduras', 'COM CEN'], ['Mix paisana de verduras', 'COM CEN'], ['Mix juliana de verduras', 'COM CEN'],
+    ['Crema de verduras', 'CEN'], ['Crema de calabaza y zanahoria', 'CEN'], ['Crema de espárragos', 'CEN'], ['Vichyssoise', 'CEN'],
+    ['Patata micro', 'COM CEN'], ['Batata micro', 'COM CEN'], ['Puré de patata', 'CEN'],
+    ['Taquitos de salmón ahumado', 'COM CEN'], ['Atún al natural', 'COM CEN']
+  ]
 };
+
+/** Productos recomendados para una comida. */
+const productsFor = slot => NUTRI.products.filter(([, slots]) => slots.split(' ').includes(slot)).map(([t]) => t);
 
 /**
  * Ajusta los candidatos de una comida a las indicaciones de la nutricionista.
@@ -444,7 +460,7 @@ const NUTRI = {
 function applyNutriPrefs(cands, ctx) {
   return cands.map(c => {
     const t = normText(c.text);
-    let bonus = 0;
+    let bonus = c.product ? 0.4 : 0;   // productos recomendados de Mercadona: que salgan en alguna idea
     if (c.groups.includes('FS')) bonus += NUTRI.nuts.test(t) ? 1 : -0.3;
     if (c.groups.includes('FRUTA') && NUTRI.banana.test(t)) {
       if (!ctx.trainingDay) return null;
@@ -455,9 +471,11 @@ function applyNutriPrefs(cands, ctx) {
       if (ctx.fishNote === 'blanco') bonus += NUTRI.whiteFish.test(t) ? 1 : NUTRI.blueFish.test(t) ? -0.8 : -0.3;
     }
     if (ctx.slot === 'CEN') {
-      // En la cena, otras proteínas solo si el menú ideal las pide ese día (p. ej. carne el domingo).
-      const other = c.groups.filter(g => PROTEINS.includes(g) && g !== 'PROT_NC' && !NUTRI.dinnerProteins.includes(g));
-      if (other.some(g => !(ctx.needed && ctx.needed.has(g)))) return null;
+      // En la cena, solo la proteína que pide el menú ideal (huevo o pescado, alternando; carne si la pide).
+      // Si no pide ninguna, huevo o pescado.
+      const neededProt = PROTEINS.filter(g => g !== 'PROT_NC' && ctx.needed && ctx.needed.has(g));
+      const allowed = neededProt.length ? neededProt : NUTRI.dinnerProteins;
+      if (c.groups.some(g => PROTEINS.includes(g) && g !== 'PROT_NC' && !allowed.includes(g))) return null;
       if (ctx.dinnerPrefer && c.groups.includes(ctx.dinnerPrefer)) bonus += 0.7;
       // Por la noche, hidratos de tubérculos (patata, boniato…), no cereal; siempre hay alguno en NUTRI.defaults.
       if (c.groups.includes('CHO')) { if (!NUTRI.tubers.test(t)) return null; bonus += 0.5; }
