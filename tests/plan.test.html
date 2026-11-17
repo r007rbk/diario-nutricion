@@ -168,6 +168,25 @@ const groups = t => classifyMeal(t).groups;
     eq('progreso: día sin nada registrado = sin datos', [scoreDay(ev, {}, 'past', h).day.level, scoreDay(ev, {}, 'past', h).rows.DES.level], ['none', 'none']);
   }
 
+  // ── Indicaciones de la nutricionista en ¿Qué como? ──
+  {
+    const C = texts => texts.map(t => ({ text: t, combo: false, groups: classifyMeal(t).groups }));
+    const first = (needs, cands, ctx) => (proposeMeals(needs, applyNutriPrefs(cands, ctx))[0] || { parts: [] }).parts;
+    const mm = C(['Pistachos', 'Plátano', 'Manzana', 'Nueces']);
+    eq('nutri: frutos secos preferidos y sin plátano sin entreno', first([{ g: 'FS' }, { g: 'FRUTA' }], mm, { slot: 'MM1', trainingDay: false }).sort(), ['Manzana', 'Nueces']);
+    eq('nutri: plátano los días de entreno', first([{ g: 'FRUTA' }], C(['Manzana', 'Plátano']), { slot: 'MER', trainingDay: true }), ['Plátano']);
+    eq('nutri: sin entreno nunca plátano', applyNutriPrefs(C(['Plátano', 'Manzana']), { slot: 'MER', trainingDay: false }).map(c => c.text), ['Manzana']);
+    const fish = C(['Merluza a la plancha', 'Atún a la plancha', 'Boquerones']);
+    eq('nutri: pescado azul = salmón, boquerones, sardinillas', first([{ g: 'PESCADO' }], fish, { slot: 'COM', fishNote: 'azul' }), ['Boquerones']);
+    eq('nutri: pescado blanco', first([{ g: 'PESCADO' }], fish, { slot: 'CEN', fishNote: 'blanco' }), ['Merluza a la plancha']);
+    const dinner = C(['Pollo a la plancha', 'Tortilla francesa', 'Salmón a la plancha', 'Arroz integral', 'Patata cocida']);
+    eq('nutri: cena sin carne si no la pide el menú', applyNutriPrefs(dinner, { slot: 'CEN', needed: new Set(['HUEVO']) }).some(c => /Pollo/.test(c.text)), false);
+    eq('nutri: carne en la cena si el menú la pide', applyNutriPrefs(dinner, { slot: 'CEN', needed: new Set(['CARNE']) }).some(c => /Pollo/.test(c.text)), true);
+    eq('nutri: cena alterna (ayer huevo → hoy pescado)', first([{ g: 'HUEVO', weight: 1 }, { g: 'PESCADO', weight: 2 }], dinner, { slot: 'CEN', dinnerPrefer: 'PESCADO', needed: new Set(['HUEVO', 'PESCADO']) })[0], 'Salmón a la plancha');
+    eq('nutri: por la noche, tubérculos antes que HC integral', first([{ g: 'CHO' }], dinner, { slot: 'CEN', needed: new Set(['CHO']) }), ['Patata cocida']);
+    eq('nutri: a mediodía no cambia el cereal', first([{ g: 'CHO' }], C(['Arroz integral', 'Patata cocida']), { slot: 'COM' }), ['Arroz integral']);
+  }
+
   document.getElementById('out').textContent = results.join('\n');
 })().catch(e => { document.getElementById('out').textContent = 'ERROR ' + e.stack; });
 </script>

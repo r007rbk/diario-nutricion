@@ -1,7 +1,7 @@
 'use strict';
 
 // Cambia junto con ?v= en index.html y VERSION en sw.js.
-const APP_VERSION = 12;
+const APP_VERSION = 13;
 // Versión del script de Google que necesita esta app (solo cambia cuando cambia Code.gs).
 const SCRIPT_REQUIRED = 7;
 
@@ -1739,6 +1739,7 @@ function mealCandidates(slotKey) {
   presetItems(slotKey).forEach(t => add(t, false));
   ((h[slotKey] || {}).items || []).forEach(r => add(r[0], false));
   ((h.ALL || {}).items || []).slice(0, 150).forEach(r => add(r[0], false));
+  NUTRI.defaults.forEach(t => add(t, false));   // lo que recomienda la nutricionista, aunque no esté en el histórico
   // Propuestas cortas y realistas: nada de ensaladas de seis ingredientes ni platos de restaurante.
   return texts
     .filter(c => c.text.length <= 60 && listOf(c.text).length <= 3)
@@ -1767,6 +1768,15 @@ function renderEat() {
     : 'Propuestas con tus platos de siempre para cumplir el menú ideal de hoy.';
 
   state.eatVariant = state.eatVariant || {};
+  // Contexto para las indicaciones de la nutricionista
+  const schemeDay = currentScheme()[weekdayIndex(state.date)] || {};
+  const trainText = [view.slots.ENT, view.slots.GYM].map(x => (x || '').trim()).filter(Boolean).join(' ');
+  const trainingDay = !!(trainText || (schemeDay.training || '').trim());
+  // Bici: lo registrado manda; si aún no hay entreno, lo que dice el esquema para hoy.
+  const bikeDay = trainText ? BIKE_RE.test(view.slots.ENT || '') : BIKE_RE.test(schemeDay.training || '');
+  const lastDinner = withDerived(classifyMeal(viewDay(addDays(state.date, -1)).slots.CEN || '', state.overrides).groups, '');
+  const dinnerPrefer = lastDinner.includes('HUEVO') && !lastDinner.includes('PESCADO') ? 'PESCADO'
+    : lastDinner.includes('PESCADO') && !lastDinner.includes('HUEVO') ? 'HUEVO' : null;
   let first = true;
   // Lo que ya cubren las propuestas anteriores del día (para no repetir plato ni lo pendiente).
   const plannedPending = new Set();
@@ -1783,12 +1793,22 @@ function renderEat() {
       }
       return;
     }
-    if (!exp && !MAIN_SLOTS.includes(slot)) return;
-    const wanted = suggestGroups(week, state.date, slot)
+    const bikeDuring = slot === 'DU' && bikeDay;
+    if (!exp && !MAIN_SLOTS.includes(slot) && !bikeDuring) return;
+    let wanted = suggestGroups(week, state.date, slot)
       .filter(w => !(w.reason === 'pending' && plannedPending.has(w.g) && (w.count || 1) <= 1));
-    const needs = wanted.map(w => ({ g: w.g, weight: w.reason === 'pending' ? 3 : 1 }));
-    const cands = mealCandidates(slot).filter(c => !usedTexts.has(keyOf(c.text)));
-    const proposals = needs.length ? proposeMeals(needs, cands) : [];
+    // Cenas: huevo o pescado (alternando); otras proteínas pendientes, mejor en la comida.
+    // Si el menú ideal ya pide una proteína para la cena, manda esa (así se alternan huevo y pescado).
+    if (slot === 'CEN') {
+      const schemeProtein = wanted.some(w => w.reason === 'scheme' && PROTEINS.includes(w.g));
+      wanted = wanted.filter(w => w.reason !== 'pending' || !PROTEINS.includes(w.g) || (!schemeProtein && NUTRI.dinnerProteins.includes(w.g)));
+    }
+    const needs = wanted.map(w => ({ g: w.g, weight: (w.reason === 'pending' ? 3 : 1) + (slot === 'CEN' && w.g === dinnerPrefer ? 1 : 0) }));
+    const fishNote = ((exp && exp.groups.find(x => x.g === 'PESCADO')) || {}).note || '';
+    const ctx = { slot, trainingDay, fishNote: /azul/.test(fishNote) ? 'azul' : /blanco/.test(fishNote) ? 'blanco' : '', dinnerPrefer, needed: new Set(wanted.map(w => w.g)) };
+    const cands = applyNutriPrefs(mealCandidates(slot).filter(c => !usedTexts.has(keyOf(c.text))), ctx);
+    const proposals = bikeDuring ? [{ parts: [NUTRI.bikeDuring.food], drinks: NUTRI.bikeDuring.drinks, covers: [], later: [], missing: [] }]
+      : needs.length ? proposeMeals(needs, cands) : [];
     const v = (state.eatVariant[slot] || 0) % Math.max(1, proposals.length);
     const prop = proposals[v];
     if (prop) {
@@ -1803,7 +1823,7 @@ function renderEat() {
     head.className = 'eat-head';
     head.innerHTML = '<h3></h3><span class="hint"></span>';
     head.querySelector('h3').textContent = `${SLOT[slot].icon} ${SLOT[slot].label}`;
-    head.querySelector('.hint').textContent = exp && exp.training ? '🏃 hoy entrenas' : exp && exp.libre ? '✨ con algo a elegir' : '';
+    head.querySelector('.hint').textContent = bikeDuring ? '🚴 bici' : exp && exp.training ? '🏃 hoy entrenas' : exp && exp.libre ? '✨ con algo a elegir' : '';
     card.appendChild(head);
 
     const want = document.createElement('div');
@@ -1814,15 +1834,34 @@ function renderEat() {
       c.textContent = groupLabel(w.g) + (w.reason === 'pending' ? ' · pendiente' : '') + (w.note ? ` (${w.note})` : '');
       want.appendChild(c);
     });
-    if (exp && exp.during) { const c = document.createElement('span'); c.className = 'gchip future'; c.textContent = exp.note ? `💧 durante: ${exp.note}` : '💧 algo durante el entreno'; want.appendChild(c); }
+    if (exp && exp.during && !bikeDuring) { const c = document.createElement('span'); c.className = 'gchip future'; c.textContent = exp.note ? `💧 durante: ${exp.note}` : '💧 algo durante el entreno'; want.appendChild(c); }
     card.appendChild(want);
 
     const body = document.createElement('div');
     body.className = 'eat-proposal';
     if (prop) {
-      const text = capFirst(prop.parts.map((t, i) => (i ? lowFirst(t) : t)).join(', '));
+      const text = capFirst(prop.parts.map((t, i) => (i ? lowFirst(t) : t)).join(', ')) + (prop.drinks ? `. Bebida: ${prop.drinks}` : '');
       body.innerHTML = '<p class="eat-text"></p>';
       body.querySelector('.eat-text').textContent = text;
+      if (bikeDuring) {
+        const m = document.createElement('p');
+        m.className = 'hint';
+        m.textContent = `${capFirst(NUTRI.bikeDuring.note)}: 1 guayaba, bebida isotónica y agua.`;
+        body.appendChild(m);
+      }
+      const tips = [];
+      if (ctx.fishNote === 'azul' && wanted.some(w => w.g === 'PESCADO')) tips.push('pescado azul: salmón, boquerones o sardinillas');
+      if (ctx.fishNote === 'blanco' && wanted.some(w => w.g === 'PESCADO')) tips.push('pescado blanco: merluza, bacalao, rape, lubina…');
+      if (wanted.some(w => w.g === 'FS')) tips.push('frutos secos: nueces, avellanas o almendras');
+      if (wanted.some(w => w.g === 'FRUTA')) tips.push(trainingDay ? 'hoy entrenas: el plátano va bien' : 'sin entreno: mejor otra fruta que el plátano');
+      if (slot === 'CEN' && wanted.some(w => w.g === 'CHO')) tips.push('por la noche, mejor tubérculos (patata, boniato) que cereal integral');
+      if (slot === 'CEN' && dinnerPrefer) tips.push(`ayer cenaste ${dinnerPrefer === 'PESCADO' ? 'huevo' : 'pescado'}: hoy toca ${dinnerPrefer === 'PESCADO' ? 'pescado' : 'huevo'}`);
+      if (tips.length) {
+        const m = document.createElement('p');
+        m.className = 'hint nutri-tip';
+        m.textContent = `👩‍⚕️ ${capFirst(tips.join(' · '))}.`;
+        body.appendChild(m);
+      }
       if (prop.later.length) {
         const m = document.createElement('p');
         m.className = 'hint';
@@ -1849,7 +1888,7 @@ function renderEat() {
       reg.type = 'button';
       reg.className = 'primary';
       reg.textContent = 'Registrar esto';
-      reg.addEventListener('click', () => registerProposal(slot, prop.parts));
+      reg.addEventListener('click', () => registerProposal(slot, prop.parts, prop.drinks));
       actions.appendChild(reg);
       body.appendChild(actions);
     } else {
@@ -1873,12 +1912,17 @@ function renderEat() {
 }
 
 /** Abre el registro de esa comida con la propuesta ya escrita, para ajustarla y guardar. */
-function registerProposal(slot, parts) {
+function registerProposal(slot, parts, drinks) {
   switchView('register');
   openEntry(slot);
   const ta = $('#foodText');
   ta.value = capFirst(parts.map((t, i) => (i ? lowFirst(t) : t)).join(', '));
   ta.dispatchEvent(new Event('input'));
+  if (drinks) {
+    const d = $('#drinkText');
+    d.value = drinks;
+    d.dispatchEvent(new Event('input'));
+  }
 }
 
 // ───────────────────────── Strava ─────────────────────────

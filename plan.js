@@ -238,7 +238,7 @@ function parseScheme(values) {
         const m = TOKEN_GROUP.find(([re]) => re.test(t));
         const g = m ? m[1] : FRUIT_IN_TEXT_RE.test(t) ? 'FRUTA' : null;
         if (!g || has(g)) return;
-        const note = (m ? tok.replace(/^\S+\s*/, '') : '').replace(/\s*\(.*$/s, '').trim().toLowerCase();
+        const note = (m ? tok.slice(t.match(m[0])[0].length) : '').replace(/\s*\(.*$/s, '').trim().toLowerCase();
         groups.push({ g, note: (times ? `×${times[1]} ` : '') + note });
       });
       const prev = day.slots[slot];
@@ -424,6 +424,48 @@ function scoreDay(ev, slots, status, harvardFn) {
  */
 const PROTEINS = ['PESCADO', 'CARNE', 'HUEVO', 'LEGUMBRE', 'PROT_NC'];
 
+// Indicaciones de la nutricionista para las propuestas (noviembre 2026).
+const NUTRI = {
+  nuts: /\b(nuez|nueces|avellanas?|almendras?)\b/,          // frutos secos preferidos
+  banana: /\b(platanos?|bananas?)\b/,                       // plátano: solo días de entreno
+  blueFish: /\b(salmon|boquerone?s?|sardin\w*)\b/,          // pescado azul: salmón, boquerones, sardinillas
+  whiteFish: /\b(merluza|bacalao|rape|lubina|dorada|lenguado|gallo|pescadilla|rodaballo|besugo|panga|perca|abadejo|corvina)\b/,
+  dinnerProteins: ['HUEVO', 'PESCADO'],                      // cenas: alternar huevo y pescado
+  tubers: /\b(patatas?|boniatos?|batatas?|yuca|tuberculos?)\b/,   // por la noche, mejor tubérculos que HC integral
+  defaults: ['Nueces', 'Almendras', 'Avellanas', 'Salmón a la plancha', 'Boquerones', 'Sardinillas', 'Merluza a la plancha', 'Patata cocida', 'Boniato asado'],
+  bikeDuring: { food: '1 guayaba', drinks: 'bebida isotónica, agua', note: 'por cada hora de bici' }
+};
+
+/**
+ * Ajusta los candidatos de una comida a las indicaciones de la nutricionista.
+ * ctx: { slot, trainingDay, fishNote ('azul'|'blanco'|''), dinnerPrefer ('HUEVO'|'PESCADO'|null), needed: Set de grupos }
+ * Devuelve los candidatos sin los que no tocan y con `bonus` para los preferidos.
+ */
+function applyNutriPrefs(cands, ctx) {
+  return cands.map(c => {
+    const t = normText(c.text);
+    let bonus = 0;
+    if (c.groups.includes('FS')) bonus += NUTRI.nuts.test(t) ? 1 : -0.3;
+    if (c.groups.includes('FRUTA') && NUTRI.banana.test(t)) {
+      if (!ctx.trainingDay) return null;
+      bonus += 0.8;
+    }
+    if (c.groups.includes('PESCADO')) {
+      if (ctx.fishNote === 'azul') bonus += NUTRI.blueFish.test(t) ? 1 : NUTRI.whiteFish.test(t) ? -0.8 : -0.3;
+      if (ctx.fishNote === 'blanco') bonus += NUTRI.whiteFish.test(t) ? 1 : NUTRI.blueFish.test(t) ? -0.8 : -0.3;
+    }
+    if (ctx.slot === 'CEN') {
+      // En la cena, otras proteínas solo si el menú ideal las pide ese día (p. ej. carne el domingo).
+      const other = c.groups.filter(g => PROTEINS.includes(g) && g !== 'PROT_NC' && !NUTRI.dinnerProteins.includes(g));
+      if (other.some(g => !(ctx.needed && ctx.needed.has(g)))) return null;
+      if (ctx.dinnerPrefer && c.groups.includes(ctx.dinnerPrefer)) bonus += 0.7;
+      // Por la noche, hidratos de tubérculos (patata, boniato…), no cereal; siempre hay alguno en NUTRI.defaults.
+      if (c.groups.includes('CHO')) { if (!NUTRI.tubers.test(t)) return null; bonus += 0.5; }
+    }
+    return { ...c, bonus };
+  }).filter(Boolean);
+}
+
 function proposeMeals(needs, candidates, count = 5, maxParts = 4) {
   const W = Object.fromEntries(needs.map(n => [n.g, n.weight || 1]));
   // Una comida lleva un solo plato de proteína: cuenta solo la que más pesa de las que trae.
@@ -447,7 +489,7 @@ function proposeMeals(needs, candidates, count = 5, maxParts = 4) {
   for (let v = 0; v < count * 3 && proposals.length < count; v++) {
     const first = cands
       .filter(c => !usedFirst.has(c.text))
-      .map(c => ({ c, s: gain(c.groups, new Set()) + (c.combo ? 0.5 : 0) - 0.15 * extra(c.groups) - c.i * 0.002 }))
+      .map(c => { const g = gain(c.groups, new Set()); return { c, s: g + (g > 0 ? c.bonus || 0 : 0) + (c.combo ? 0.5 : 0) - 0.15 * extra(c.groups) - c.i * 0.002 }; })
       .filter(x => x.s >= 0.9)
       .sort((a, b) => b.s - a.s)[0];
     if (!first) break;
@@ -458,7 +500,7 @@ function proposeMeals(needs, candidates, count = 5, maxParts = 4) {
       const hasProtein = parts.some(p => proteinsOf(p.groups).length);
       const next = cands
         .filter(c => !c.combo && !parts.includes(c) && !(hasProtein && proteinsOf(c.groups).length))
-        .map(c => ({ c, s: gain(c.groups, covered) - 0.15 * extra(c.groups) - c.i * 0.002 }))
+        .map(c => { const g = gain(c.groups, covered); return { c, s: g + (g > 0 ? c.bonus || 0 : 0) - 0.15 * extra(c.groups) - c.i * 0.002 }; })
         .filter(x => x.s >= 0.9)
         .sort((a, b) => b.s - a.s)[0];
       if (!next) break;
