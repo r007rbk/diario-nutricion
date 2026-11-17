@@ -1,7 +1,7 @@
 'use strict';
 
 // Cambia junto con ?v= en index.html y VERSION en sw.js.
-const APP_VERSION = 10;
+const APP_VERSION = 11;
 // Versión del script de Google que necesita esta app (solo cambia cuando cambia Code.gs).
 const SCRIPT_REQUIRED = 7;
 
@@ -918,10 +918,10 @@ function renderPlan() {
   // Barras por grupo: hecho (hasta hoy) sobre objetivo de la semana
   const bars = $('#weekBars');
   bars.innerHTML = '';
-  GROUPS.forEach(({ key }) => {
+  PLAN_GROUPS.forEach(({ key, derived }) => {
     const target = week.target[key] || 0;
     const actual = week.actual[key] || 0;
-    if (!target && !actual) return;
+    if (!target && (!actual || derived)) return;
     const toDate = week.targetToDate[key] || 0;
     const ok = actual >= target;
     const behind = (week.actualToDate[key] || 0) < toDate;
@@ -955,14 +955,14 @@ function dayCard(day) {
   const card = document.createElement('details');
   card.className = `card day-card ${day.status}`;
   if (day.status === 'today') card.open = true;
-  const groups = GROUPS.map(g => g.key).filter(g => day.target[g]);
+  const groups = PLAN_GROUPS.map(g => g.key).filter(g => day.target[g]);
   const met = groups.filter(g => (day.actual[g] || 0) >= day.target[g]).length;
   const summary = document.createElement('summary');
   const title = `${WEEKDAYS[d.getDay()]} ${d.getDate()}`;
   const score = day.status === 'future' ? '' : `${met}/${groups.length}`;
   summary.innerHTML = `<span class="day-title"></span><span class="day-train"></span><span class="day-score"></span>`;
   summary.querySelector('.day-title').textContent = title + (day.status === 'today' ? ' · hoy' : '');
-  summary.querySelector('.day-train').textContent = (day.trained ? '🏃 ' : '') + (day.schemeTraining || '').split('\n')[0];
+  summary.querySelector('.day-train').textContent = (day.trained ? '🏃 ' : '') + (day.schemeTraining || '').replace(/\s*\n\s*/g, ' ');
   summary.querySelector('.day-score').textContent = score;
   summary.querySelector('.day-score').className = 'day-score ' + (day.status === 'future' ? '' : met === groups.length ? 'ok' : 'miss');
   card.appendChild(summary);
@@ -1005,7 +1005,7 @@ function dayCard(day) {
         want.appendChild(c);
       });
       if (exp.libre) { const c = document.createElement('span'); c.className = 'gchip future'; c.textContent = '✨ a elegir'; want.appendChild(c); }
-      if (exp.during) { const c = document.createElement('span'); c.className = 'gchip ' + (meal ? 'ok' : day.status === 'future' ? 'future' : 'miss'); c.textContent = '💧 algo durante el entreno'; want.appendChild(c); }
+      if (exp.during) { const c = document.createElement('span'); c.className = 'gchip ' + (meal ? 'ok' : day.status === 'future' ? 'future' : 'miss'); c.textContent = exp.note ? `💧 durante: ${exp.note}` : '💧 algo durante el entreno'; want.appendChild(c); }
       row.appendChild(want);
     }
     if (meal) {
@@ -1016,7 +1016,7 @@ function dayCard(day) {
       const fix = document.createElement('button');
       fix.type = 'button';
       fix.className = 'link small';
-      fix.textContent = `Detectado: ${meal.groups.map(g => GROUP[g].icon).join(' ') || 'nada'} · Corregir`;
+      fix.textContent = `Detectado: ${meal.groups.filter(g => !GROUP[g].derived).map(g => GROUP[g].icon).join(' ') || 'nada'} · Corregir`;
       fix.addEventListener('click', () => openGroupsEditor(viewDay(day.date).slots[slot], () => renderPlan()));
       row.appendChild(fix);
     }
@@ -1078,7 +1078,8 @@ function renderPlanBlock() {
   form.wantedGroups = wanted.map(w => w.g);
   showPlan(!!wanted.length);
   if (!wanted.length) return;
-  const typed = new Set(classifyMeal(clean($('#foodText').value), state.overrides).groups);
+  const typedText = clean($('#foodText').value);
+  const typed = new Set(withDerived(classifyMeal(typedText, state.overrides).groups, typedText));
   gbox.innerHTML = '';
   wanted.forEach(w => {
     const label = groupLabel(w.g) + (w.note ? ` (${w.note})` : '') + (w.reason === 'pending' ? ` ×${w.count}` : '');
@@ -1112,7 +1113,7 @@ function renderPlanBlock() {
     const k = keyOf(t);
     if (seen.has(k) || typedKeys.has(k)) return;
     seen.add(k);
-    const g = classifyMeal(t, state.overrides).groups;
+    const g = withDerived(classifyMeal(t, state.overrides).groups, t);
     const score = need.filter(n => g.includes(n)).reduce((a, n) => a + weight(n), 0);
     if (score) scored.push({ t, score, rank });
   });
@@ -1129,7 +1130,7 @@ function renderDetected() {
   if (!text) return;
   const g = classifyMeal(text, state.overrides).groups;
   // Los grupos del menú ideal ya se ven marcados arriba: aquí solo lo demás.
-  const extra = g.filter(x => !(form.wantedGroups || []).includes(x));
+  const extra = g.filter(x => !(form.wantedGroups || []).includes(x) && !GROUP[x].derived);
   $('#detectedText').textContent = !g.length ? 'No reconozco ningún grupo.'
     : extra.length ? `${(form.wantedGroups || []).length ? 'También' : 'Detectado'}: ${extra.map(groupLabel).join(' · ')}` : '';
   $('#fixGroupsBtn').textContent = extra.length || !g.length ? 'Corregir' : '¿Grupos mal? Corregir';
@@ -1193,7 +1194,7 @@ function renderTodayPlan() {
   const week = computeWeek(mondayOf(state.date));
   const day = week.days.find(d => d.date === state.date);
   if (!day || day.status === 'future') { btn.hidden = true; return; }
-  const missing = GROUPS.map(g => g.key).filter(g => (day.target[g] || 0) > (day.actual[g] || 0));
+  const missing = PLAN_GROUPS.map(g => g.key).filter(g => (day.target[g] || 0) > (day.actual[g] || 0));
   const pend = state.date === todayIso() ? Object.keys(week.pending).filter(g => !missing.includes(g)) : [];
   btn.hidden = false;
   if (!missing.length && !pend.length) { btn.textContent = '📋 Menú ideal de hoy cumplido ✓'; btn.className = 'today-plan ok'; return; }
@@ -1506,7 +1507,7 @@ function mealCandidates(slotKey) {
   // Propuestas cortas y realistas: nada de ensaladas de seis ingredientes ni platos de restaurante.
   return texts
     .filter(c => c.text.length <= 60 && listOf(c.text).length <= 3)
-    .map(c => ({ ...c, groups: classifyMeal(c.text, state.overrides).groups }))
+    .map(c => ({ ...c, groups: withDerived(classifyMeal(c.text, state.overrides).groups, c.text) }))
     .filter(c => c.groups.length);
 }
 
@@ -1578,7 +1579,7 @@ function renderEat() {
       c.textContent = groupLabel(w.g) + (w.reason === 'pending' ? ' · pendiente' : '') + (w.note ? ` (${w.note})` : '');
       want.appendChild(c);
     });
-    if (exp && exp.during) { const c = document.createElement('span'); c.className = 'gchip future'; c.textContent = '💧 algo durante el entreno'; want.appendChild(c); }
+    if (exp && exp.during) { const c = document.createElement('span'); c.className = 'gchip future'; c.textContent = exp.note ? `💧 durante: ${exp.note}` : '💧 algo durante el entreno'; want.appendChild(c); }
     card.appendChild(want);
 
     const body = document.createElement('div');

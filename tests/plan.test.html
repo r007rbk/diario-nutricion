@@ -107,6 +107,49 @@ const groups = t => classifyMeal(t).groups;
   results.push(`ℹ️ celdas con algún grupo: ${classified}/${cells} (${Math.round(100 * classified / cells)}%)`);
   results.push(`ℹ️ trozos sin grupo más frecuentes: ${Object.entries(unknown).sort((a, b) => b[1] - a[1]).slice(0, 60).map(([k, n]) => `${k}(${n})`).join(', ')}`);
 
+  // ── Esquema nuevo (noviembre 2026) ──
+  {
+    const POST_SMOOTHIE = 'POST-ENTRENO\n(smoothie): PLÁTANO O\nMANGO + LÁCTEO\nDESNATADO';
+    const HC_LEG = 'Verdura\nLegumbre + HC integral (un puñadito de arroz o una rebanada de pan integral p un puñadito de quinoa)';
+    const HC_TUB = 'Verdura\nHC integral o tubérculos\n';
+    const v = [
+      ['', '20:00-21:00\nFUERZA', '20:00-21:00\nCORRER', '', '11:00-13:00 BICI', '', '11:00-13:00 BICI O\nCORRER/FUERZA', ''],
+      ['', 'LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO', 'DOMINGO'],
+      ['DESAYUNO 9:30', 'FRUTA + HC INTEGRAL + LÁCTEO', 'FRUTA + HC INTEGRAL + LÁCTEO', 'FRUTA + HC INTEGRAL + LÁCTEO', 'FRUTA + 2*HC INTEGRAL + LÁCTEO', 'FRUTA + HC INTEGRAL + LÁCTEO', 'FRUTA + 2*HC INTEGRAL + LÁCTEO', 'FRUTA + HC INTEGRAL + LÁCTEO', 'Subir cantidad de hidratos los días que entrenamos por la mañana.'],
+      ['Media mañana 12:30/Post-entreno Jueves y sábado', 'FS + Fruta', 'FS + Fruta', 'FS + Fruta', POST_SMOOTHIE, 'FS + Fruta', POST_SMOOTHIE, 'FS + Fruta', 'Nueces, avellanas y almendras', 'BICI: Llevar 250 ml isotónico y 1 guayaba a la hora.', 'Post-entreno: Añadir pan blanco o crema de arroz si se sube intensidad.'],
+      ['Almuerzo principal 15:30', HC_TUB + 'Pescado azul', HC_LEG, HC_LEG, HC_LEG, HC_TUB + 'CARNE', 'Verdura\nHC integral o tubérculos\nCARNE', 'Verdura\nHC integral o\ntubérculos\nELEGIR PROTEÍNA NO\nCÁRNICA (TOFU, SOJA\nTEXTURIZADA, QUESO\nFRESCO, MARISCO...)', 'Plato de Harvard'],
+      ['Merienda 18:30', 'LÁCTEO tipo skyr + Fruta', 'LÁCTEO + Fruta', 'LÁCTEO + Fruta', 'LÁCTEO + Fruta + Frutos secos', 'LÁCTEO + Fruta', 'LÁCTEO + Fruta + Frutos secos', 'LÁCTEO + Fruta'],
+      ['Post-entreno 21:00', 'Un par de dátiles o un plátano o un puñado de fruta deshidratada', 'Smoothie: Un par de dátiles o un plátano o un puñado de fruta deshidratada + lácteo desnatado', '', '', '', '', ''],
+      ['Cena 22:00', HC_TUB + 'Huevo (2 uds)', HC_TUB + 'Pescado azul', HC_TUB + 'Huevo (2 uds)', HC_TUB + 'Pescado azul', HC_TUB + 'Huevo (2 uds)', '"Verdura\nHC integral o tubérculos\nPescado blanco', HC_TUB + 'CARNE', 'Plato de Harvard']
+    ];
+    const sc = parseScheme(v);
+    const gg = (d, s) => sc[d].slots[s] ? sc[d].slots[s].groups.map(x => x.g) : null;
+    const note = (d, s, g) => sc[d].slots[s].groups.find(x => x.g === g).note;
+    eq('nuevo: entreno del lunes', sc[0].training, '20:00-21:00\nFUERZA');
+    eq('nuevo: desayuno con HC integral', [gg(0, 'DES'), note(0, 'DES', 'CHO')], [['FRUTA', 'CHO', 'LACTEO'], 'integral']);
+    eq('nuevo: jueves doble de hidratos', note(3, 'DES', 'CHO'), '×2 integral');
+    eq('nuevo: media mañana del lunes', gg(0, 'MM1'), ['FS', 'FRUTA']);
+    eq('nuevo: jueves la media mañana es post-entreno', [gg(3, 'MM1'), gg(3, 'DE'), sc[3].slots.DE.training], [null, ['FRUTA', 'LACTEO'], true]);
+    eq('nuevo: almuerzo del lunes', [gg(0, 'COM'), note(0, 'COM', 'PESCADO'), note(0, 'COM', 'CHO')], [['VERDURA', 'CHO', 'PESCADO'], 'azul', 'integral o tubérculos']);
+    eq('nuevo: almuerzo martes legumbre + HC (sin el paréntesis)', [gg(1, 'COM'), note(1, 'COM', 'CHO')], [['VERDURA', 'LEGUMBRE', 'CHO'], 'integral']);
+    eq('nuevo: domingo proteína no cárnica, sin carne', gg(6, 'COM'), ['PROT_NC', 'VERDURA', 'CHO']);
+    eq('nuevo: post-entreno 21:00 lunes y martes', [gg(0, 'DE'), gg(1, 'DE'), sc[1].slots.DE.training, gg(2, 'DE')], [['FRUTA'], ['FRUTA', 'LACTEO'], true, null]);
+    eq('nuevo: cena del sábado (con comilla)', [gg(5, 'CEN'), note(5, 'CEN', 'PESCADO')], [['VERDURA', 'CHO', 'PESCADO'], 'blanco']);
+    eq('nuevo: merienda del jueves', gg(3, 'MER'), ['LACTEO', 'FRUTA', 'FS']);
+    eq('nuevo: nota de la bici', sc[3].bikeNote, 'Llevar 250 ml isotónico y 1 guayaba a la hora.');
+
+    const bike = evaluateDay(sc[3], { ENT: '11:00 Bici 81.3Km 4h' }, {}, true);
+    const run = evaluateDay(sc[3], { ENT: '11:00 Carrera 8Km' }, {}, true);
+    eq('nuevo: día de bici pide el durante', [!!bike.expectedSlots.DU, bike.expectedSlots.DU && bike.expectedSlots.DU.during, !!run.expectedSlots.DU], [true, true, false]);
+    eq('nuevo: post-entreno solo si entrenas', [!!evaluateDay(sc[3], {}, {}, false).expectedSlots.DE, !!bike.expectedSlots.DE], [false, true]);
+
+    const sun = t => { const e = evaluateDay(sc[6], { COM: t }, {}, false); return [e.target.PROT_NC, e.actual.PROT_NC || 0, e.actual.CARNE || 0]; };
+    eq('nuevo: tofu cumple la proteína no cárnica', sun('15:30 Tofu salteado con verduras y arroz integral'), [1, 1, 0]);
+    eq('nuevo: queso fresco y marisco también', [sun('Ensalada con queso fresco')[1], sun('Arroz con gambas y calamares')[1]], [1, 1]);
+    eq('nuevo: pollo no cuenta', sun('Pollo con verduras'), [1, 0, 1]);
+    eq('nuevo: no se mezcla con la clasificación normal', groups('Merluza con verduras'), ['PESCADO', 'VERDURA']);
+  }
+
   document.getElementById('out').textContent = results.join('\n');
 })().catch(e => { document.getElementById('out').textContent = 'ERROR ' + e.stack; });
 </script>

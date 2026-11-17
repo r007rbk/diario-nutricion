@@ -15,7 +15,23 @@ const GROUPS = [
   { key: 'HUEVO', label: 'Huevo', icon: '🥚' },
   { key: 'FS', label: 'Frutos secos', icon: '🥜' }
 ];
-const GROUP = Object.fromEntries(GROUPS.map(g => [g.key, g]));
+// Grupo derivado del esquema: "elegir proteína no cárnica" (tofu, soja, legumbre, pescado,
+// marisco, huevo, queso fresco…). No se clasifica con diccionario: sale de los otros grupos.
+const PROT_NC = { key: 'PROT_NC', label: 'Proteína no cárnica', icon: '🌱', derived: true };
+const PLAN_GROUPS = [...GROUPS, PROT_NC];
+const GROUP = Object.fromEntries(PLAN_GROUPS.map(g => [g.key, g]));
+const FRESH_CHEESE_RE = /\b(queso fresco|queso de burgos|requeson|cottage|mozzarella fresca)\b/;
+
+/** Proteína no cárnica: legumbre (tofu, soja…), pescado o marisco, huevo o queso fresco, sin carne. */
+function hasNonMeatProtein(groups, text) {
+  if (groups.includes('CARNE')) return false;
+  return ['LEGUMBRE', 'PESCADO', 'HUEVO'].some(g => groups.includes(g)) || FRESH_CHEESE_RE.test(normText(text));
+}
+
+/** Grupos para el menú ideal: los del diccionario más los derivados (proteína no cárnica). */
+function withDerived(groups, text) {
+  return hasNonMeatProtein(groups, text) ? [...groups, 'PROT_NC'] : groups;
+}
 
 // Palabras (sin acentos, en minúsculas) que identifican cada grupo. Se comprueban
 // como prefijo de palabra: "lenteja" encuentra "lentejas".
@@ -159,14 +175,18 @@ function classifyMeal(text, overrides) {
 // ───────────────────────── Esquema del Sheet ─────────────────────────
 
 const SCHEME_ROWS = [
-  [/^DESAYUNO/, 'DES'], [/^MM ?1/, 'MM1'], [/^MM ?2/, 'MM2'], [/^COMIDA/, 'COM'], [/^MERIENDA/, 'MER'],
+  [/^DESAYUNO/, 'DES'], [/^MM ?1/, 'MM1'], [/^MM ?2/, 'MM2'], [/^MEDIA MANANA/, 'MM1'],
+  [/^COMIDA/, 'COM'], [/^ALMUERZO/, 'COM'], [/^MERIENDA/, 'MER'],
   [/^CENA/, 'CEN'], [/^POST/, 'DE'], [/^PRE/, 'AE'], [/^ANTES/, 'AE'], [/^DURANTE/, 'DU']
 ];
 const WEEKDAYS_UP = ['LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES', 'SABADO', 'DOMINGO'];
 const TOKEN_GROUP = [
   [/^LACTEO/, 'LACTEO'], [/^FRUTA/, 'FRUTA'], [/^CHO/, 'CHO'], [/^FS\b/, 'FS'], [/^FRUTOS SECOS/, 'FS'],
-  [/^VERDURA/, 'VERDURA'], [/^PESCADO/, 'PESCADO'], [/^LEGUMBRE/, 'LEGUMBRE'], [/^CARNE/, 'CARNE'], [/^HUEVO/, 'HUEVO']
+  [/^VERDURA/, 'VERDURA'], [/^PESCADO/, 'PESCADO'], [/^LEGUMBRE/, 'LEGUMBRE'], [/^CARNE\b/, 'CARNE'], [/^HUEVO/, 'HUEVO'],
+  [/^HC\b/, 'CHO'], [/^HIDRATOS/, 'CHO']
 ];
+// Si un trozo no empieza por un grupo ("Smoothie: un par de dátiles o un plátano…"), se busca fruta dentro.
+const FRUIT_IN_TEXT_RE = /\b(FRUTA|PLATANO|MANGO|DATIL)/;
 
 /**
  * values: la pestaña "ESQUEMA DE MENÚ IDEAL" como tabla (filas × columnas).
@@ -189,11 +209,14 @@ function parseScheme(values) {
     const label = up(values[r][0]);
     const rule = SCHEME_ROWS.find(([re]) => re.test(label));
     if (!rule) continue;
-    let slot = rule[1];
-    const isPost = slot === 'DE';
+    const rowSlot = rule[1];
     days.forEach((day, d) => {
-      const cell = String(values[r][colOf[d]] || '').trim();
+      let cell = String(values[r][colOf[d]] || '').trim();
       if (!cell) return;
+      // En la fila de media mañana, los días de entreno por la mañana la celda es el post-entreno.
+      let slot = rowSlot;
+      if (/^POST/.test(up(cell))) { slot = 'DE'; cell = cell.replace(/^[^:+]*?(entreno)\s*(\([^)]*\))?\s*:?\s*/i, ''); }
+      const isPost = slot === 'DE';
       if (up(cell) === 'DURANTE') {            // "DURANTE" en MM2 el finde: comer durante el entreno
         day.slots.DU = { groups: [], training: true, libre: false, during: true };
         return;
@@ -201,19 +224,37 @@ function parseScheme(values) {
       // "**" = a elegir: no exige nada más (en la comida del sábado: verdura + CHO + lo que quieras)
       let libre = false;
       const groups = [];
-      cell.split(/\n|\+/).map(s => s.trim()).filter(Boolean).forEach(tok => {
+      const has = g => groups.some(x => x.g === g);
+      // "Elegir proteína no cárnica (tofu, soja…)" puede ocupar varias líneas: se mira la celda entera.
+      const nonMeat = /PROTEINA NO CARNICA/.test(up(cell).replace(/\s+/g, ' '));
+      if (nonMeat) groups.push({ g: 'PROT_NC', note: '' });
+      cell.split(/\n|\+/).map(s => s.trim().replace(/^[^\p{L}\d*]+/u, '')).filter(Boolean).forEach(tok => {
         if (/^\*+$/.test(tok)) { libre = true; return; }
+        // "2*HC INTEGRAL" = doble ración: se pide igual (la cantidad no se puede comprobar), con nota.
+        const times = tok.match(/^(\d+)\s*\*\s*/);
+        if (times) tok = tok.slice(times[0].length);
         const t = up(tok);
+        if (nonMeat && /PROTEINA|CARNICA|TOFU|SOJA|QUESO|MARISCO/.test(t)) return;
         const m = TOKEN_GROUP.find(([re]) => re.test(t));
-        if (m) groups.push({ g: m[1], note: tok.replace(/^\S+\s*/, '').trim().toLowerCase() });
+        const g = m ? m[1] : FRUIT_IN_TEXT_RE.test(t) ? 'FRUTA' : null;
+        if (!g || has(g)) return;
+        const note = (m ? tok.replace(/^\S+\s*/, '') : '').replace(/\s*\(.*$/s, '').trim().toLowerCase();
+        groups.push({ g, note: (times ? `×${times[1]} ` : '') + note });
       });
       const prev = day.slots[slot];
       if (prev) { prev.groups.push(...groups); prev.libre = prev.libre || libre; }
       else day.slots[slot] = { groups, training: isPost, libre };
     });
   }
+  // Nota "BICI: llevar 250 ml isotónico y 1 guayaba a la hora": los días de bici se pide el "durante".
+  for (const row of values) for (const v of row) {
+    const m = String(v || '').trim().match(/^bici\s*:\s*(.+)$/is);
+    if (m) days.forEach(day => { day.bikeNote = m[1].replace(/\s+/g, ' ').trim(); });
+  }
   return days;
 }
+
+const BIKE_RE = /\b(bici|bicicleta|ciclismo|btt|mtb|gravel|rodillo|carretera)\b/i;
 
 // ───────────────────────── Cumplimiento ─────────────────────────
 
@@ -246,11 +287,16 @@ function evaluateDay(schemeDay, slots, overrides, trained) {
       expectedSlots[slot] = { groups: s.groups, training: s.training, during: !!s.during, libre: s.libre };
       s.groups.forEach(({ g }) => { target[g] = (target[g] || 0) + 1; });
     }
+    if (schemeDay.bikeNote && !expectedSlots.DU && BIKE_RE.test(slots.ENT || '')) {
+      expectedSlots.DU = { groups: [], training: true, during: true, libre: false, note: schemeDay.bikeNote };
+    }
   }
   for (const slot of FOOD_SLOT_KEYS) {
     const text = slots[slot] || '';
     if (!text.trim()) continue;
-    const c = classifyMeal(text, overrides);
+    const c0 = classifyMeal(text, overrides);
+    // La proteína no cárnica solo se cuenta los días que el esquema la pide.
+    const c = target.PROT_NC ? { ...c0, groups: withDerived(c0.groups, text) } : c0;
     meals[slot] = c;
     c.groups.forEach(g => { actual[g] = (actual[g] || 0) + 1; });
   }
@@ -320,7 +366,7 @@ function suggestGroups(week, date, slot) {
  * Cada propuesta empieza por un plato distinto y se completa con lo que cubra lo que falta.
  * Devuelve [{parts: [texto], covers: [grupo], missing: [grupo]}]
  */
-const PROTEINS = ['PESCADO', 'CARNE', 'HUEVO', 'LEGUMBRE'];
+const PROTEINS = ['PESCADO', 'CARNE', 'HUEVO', 'LEGUMBRE', 'PROT_NC'];
 
 function proposeMeals(needs, candidates, count = 5, maxParts = 4) {
   const W = Object.fromEntries(needs.map(n => [n.g, n.weight || 1]));
