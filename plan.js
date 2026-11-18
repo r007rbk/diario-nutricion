@@ -372,19 +372,52 @@ const PROGRESS_ROWS = [
 ];
 const levelOf = s => (s >= 0.85 ? 'good' : s >= 0.6 ? 'mid' : 'bad');
 
+// Cosas no sanas: si aparecen en una comida, esa comida sale en rojo.
+// [etiqueta, expresión sobre el texto sin acentos y en minúsculas]
+const UNHEALTHY = [
+  ['patatas de bolsa', /\b(patatas? (de bolsa|chips?)|chips|ruffles|lays|pringles|snacks? salad)/],
+  ['nachos', /\b(nachos|doritos|totopos?)\b/],
+  ['refresco', /\b(coca ?-?cola|cocacola|fanta|sprite|7 ?up|refrescos?|nestea|aquarius|tonica|red ?bull|monster|pepsi)\b/],
+  ['bollería', /\b(bollos?|bollitos?|bolleria|croissants?|cruasan|napolitanas?|donuts?|magdalenas?|sobaos?|ensaimadas?|palmeras?|berlinas?|muffins?|brownies?|cookies?|churros?|porras?)\b/],
+  ['tarta', /\b(tartas?|pasteles?|pastelitos?|bizcochos?|cheesecake)\b/],
+  ['galletas', /\b(galletas?|oreos?)\b/],
+  ['chocolate', /\b(chocolates?|nutella|bombon(es)?|kit ?kat|cola ?cao|colacao|nesquik)\b/],
+  ['helado', /\b(helados?)\b/],
+  ['fritos', /\b(patatas? fritas?|fritos?|fritas?|rebozad[oa]s?|empanad[oa]s?|a la romana|croquetas?|tempura|nuggets?|fingers?|san jacobos?)\b/],
+  ['comida rápida', /\b(pizzas?|hamburguesas?|kebabs?|burger|perritos? calientes?|hot ?dogs?)\b/],
+  ['embutido', /\b(chorizos?|salchich\w*|salami|fuet|bacon|beicon|morcillas?|mortadela|sobrasada|longanizas?|butifarras?|frankfurt\w*)\b/],
+  ['alcohol', /\b(cervezas?|cañas?|vinos?|tinto de verano|sangria|copas?|cubatas?|gin ?tonic|gin|ron|whisky|vermut|vermouth|cava|sidra|champan)\b/],
+  ['zumo', /\b(zumos?)\b/],
+  ['azúcar', /\b(azucar|mermeladas?|miel|chuches?|gominolas?|caramelos?|sirope)\b/]
+];
+// Lo que anula la penalización en ese trozo: "sin azúcar", "zero", "0,0", "sin alcohol", "tomate frito"…
+const UNHEALTHY_OK = /\b(sin azucar|sin azucares|0 ?% azucar|zero|cero|light|0[.,]0|sin alcohol|tomate frito|(cervezas?|tinto de verano|vino) (0|sin|tostada 0))\b/;
+
+/** Cosas no sanas de un texto (comida y bebida): ['refresco', 'bollería'…]. */
+function unhealthyItems(text) {
+  const found = [];
+  String(text || '').replace(/^\s*\d{1,2}[:.]\d{2}\s*/gm, '').split(/[.,;\n()]|\s+y\s+|\s+con\s+/).forEach(piece => {
+    const t = normText(piece).toLowerCase();
+    if (!t.trim() || UNHEALTHY_OK.test(t)) return;
+    UNHEALTHY.forEach(([label, re]) => { if (re.test(t) && !found.includes(label)) found.push(label); });
+  });
+  return found;
+}
+
 /**
  * Nota de un día. ev = evaluateDay(...); slots = celdas del día; status = past|today|future.
- * harvardFn(texto) → 0..1 (parte del plato Harvard que cumple).
- * Cada comida: lo que pedía el menú ideal que sí aparece (0..1), y en las principales,
- * la media con el Harvard. Sin registro: mal si tocaba y el día ya pasó; pendiente si es hoy.
- * Entreno: bien si hay entreno o gym; si no, neutro (no penaliza).
- * Día sin nada registrado: sin datos.
+ * harvardFn(texto) → 0..1: parte del plato Harvard básico (verdura, proteína, integral) que cumple.
+ * - Desayuno, comida y cena: el plato Harvard es la base (completo = bien); el menú ideal suma
+ *   (hasta medio punto) para llegar a bien aunque el Harvard no esté completo.
+ * - Media mañana, merienda y post-entreno: si es sano, bien; el menú ideal suma.
+ * - Algo no sano (refresco, bollería, fritos, embutido, alcohol…): esa comida en rojo.
+ * - Comida que tocaba y no está registrada: en rojo si el día ya pasó; pendiente si es hoy.
+ * - Entreno: bien si hay entreno o gym; si no, neutro (no penaliza).
  * Devuelve { rows: {DES: {level, score, …}}, day: {level, score} }; level = good|mid|bad|todo|none.
  */
 function scoreDay(ev, slots, status, harvardFn) {
   const rows = {};
   const scores = [];
-  const anyFood = PROGRESS_ROWS.some(r => r.key !== 'ENT' && String(slots[r.key] || '').trim());
   for (const row of PROGRESS_ROWS) {
     if (row.key === 'ENT') {
       const t = [slots.ENT, slots.GYM].map(x => String(x || '').trim()).filter(Boolean).join(' · ');
@@ -394,17 +427,26 @@ function scoreDay(ev, slots, status, harvardFn) {
     const text = String(slots[row.key] || '').trim();
     const exp = ev.expectedSlots[row.key];
     if (!text) {
-      if (!anyFood || !exp) rows[row.key] = { level: 'none' };
+      if (!exp) rows[row.key] = { level: 'none' };
       else if (status === 'past') { rows[row.key] = { level: 'bad', score: 0, missing: true }; scores.push(0); }
       else rows[row.key] = { level: 'todo' };
       continue;
     }
     const want = exp ? [...new Set(exp.groups.map(x => x.g))] : [];
     const have = new Set((ev.meals[row.key] && ev.meals[row.key].groups) || []);
-    const menu = want.length ? want.filter(g => have.has(g)).length / want.length : 1;
-    const harvard = row.harvard && harvardFn ? harvardFn(text) : null;
-    const score = harvard == null ? menu : (menu + harvard) / 2;
-    rows[row.key] = { level: levelOf(score), score, menu, harvard, missingGroups: want.filter(g => !have.has(g)) };
+    const menu = want.length ? want.filter(g => have.has(g)).length / want.length : 0;
+    const bad = unhealthyItems(text);
+    let score;
+    let harvard = null;
+    if (row.harvard && harvardFn) {
+      harvard = harvardFn(text);
+      score = Math.min(1, harvard + 0.5 * menu);
+    } else {
+      // Tentempié: sano (algún grupo reconocido) = bien; si no reconozco nada, regular.
+      score = Math.min(1, (have.size ? 0.85 : 0.6) + 0.15 * menu);
+    }
+    if (bad.length) score = Math.min(score, 0.2);
+    rows[row.key] = { level: levelOf(score), score, menu: want.length ? menu : null, harvard, unhealthy: bad, missingGroups: want.filter(g => !have.has(g)) };
     scores.push(score);
   }
   const day = scores.length

@@ -386,3 +386,4 @@ code { font-size: 12px; background: var(--bg); padding: 1px 4px; border-radius: 
 .pdot.good { background: var(--p-good); } .pdot.mid { background: var(--p-mid); } .pdot.bad { background: var(--p-bad); }
 .pdot.todo { background: transparent; box-shadow: inset 0 0 0 1.5px var(--p-mid); }
 .progress-help { display: flex; flex-direction: column; gap: 10px; }
+.unhealthy-warn { margin: 0; font-size: 13px; font-weight: 600; color: var(--p-bad, #d9534f); }

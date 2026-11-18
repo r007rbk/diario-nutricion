@@ -12,7 +12,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="styles.css?v=14">
+  <link rel="stylesheet" href="styles.css?v=15">
 </head>
 <body>
   <header class="topbar">
@@ -72,7 +72,7 @@
       <span class="pdot todo"></span>Pendiente hoy <span class="pdot none"></span>Sin datos
     </p>
     <section class="card progress-help">
-      <p class="hint">Cada comida se puntúa por lo que pedía el menú ideal que sí está registrado. En desayuno, comida y cena cuenta también el plato Harvard (mitad y mitad). Bien a partir del 85 %, regular del 60 %. Entreno: verde si entrenaste.</p>
+      <p class="hint">Desayuno, comida y cena: verde si haces el plato Harvard (verdura + proteína + integral); si no, el menú ideal suma puntos. Media mañana, merienda y post-entreno: verde si es sano; el menú ideal suma. En rojo: algo no sano (refrescos, bollería, fritos, embutido, alcohol, zumos, dulces…) o una comida que tocaba y no está registrada. Entreno: verde si entrenaste.</p>
       <label class="field">Valorado desde (inicio del esquema actual)
         <input type="date" id="progressSince">
       </label>
@@ -249,6 +249,7 @@
           <div class="harvard-head"><span>🥗 Plato Harvard</span><span class="harvard-score" id="harvardSum"></span></div>
           <div class="chips harvard-items" id="harvardItems"></div>
           <p class="hint" id="harvardTips"></p>
+          <p class="unhealthy-warn" id="unhealthyWarn" hidden></p>
         </div>
       </div>
 
@@ -298,7 +299,7 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="plan.js?v=14"></script>
-  <script src="app.js?v=14"></script>
+  <script src="plan.js?v=15"></script>
+  <script src="app.js?v=15"></script>
 </body>
 </html>

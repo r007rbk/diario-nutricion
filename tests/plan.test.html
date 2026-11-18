@@ -156,16 +156,27 @@ const groups = t => classifyMeal(t).groups;
       MM1: { groups: [{ g: 'FS' }, { g: 'FRUTA' }], training: false }, CEN: { groups: [{ g: 'VERDURA' }, { g: 'PESCADO' }], training: false } } };
     const slots = { DES: '9:30 Café con leche, pan integral con tomate, plátano', CEN: '22:00 Pollo con patatas' };
     const ev = evaluateDay(day, slots, {}, false);
-    const h = () => 0.6;
+    const h = () => 2 / 3;
     const past = scoreDay(ev, slots, 'past', h);
-    eq('progreso: desayuno completo + Harvard 3/5', [past.rows.DES.level, Math.round(past.rows.DES.score * 100)], ['mid', 80]);
-    eq('progreso: media mañana sin registrar el día pasado = mal', past.rows.MM1.level, 'bad');
-    eq('progreso: cena sin pescado ni verdura = mal', [past.rows.CEN.level, past.rows.CEN.missingGroups], ['bad', ['VERDURA', 'PESCADO']]);
+    eq('progreso: Harvard 2/3 + menú ideal completo = bien', [past.rows.DES.level, Math.round(past.rows.DES.score * 100)], ['good', 100]);
+    eq('progreso: comida que tocaba y no se hizo = mal', [past.rows.MM1.level, past.rows.MM1.missing], ['bad', true]);
+    eq('progreso: Harvard 2/3 sin menú ideal = regular', [past.rows.CEN.level, past.rows.CEN.missingGroups], ['mid', ['VERDURA', 'PESCADO']]);
+    eq('progreso: Harvard completo sin menú ideal = bien', scoreDay(ev, slots, 'past', () => 1).rows.CEN.level, 'good');
     eq('progreso: merienda sin esquema y vacía = neutro', past.rows.MER.level, 'none');
     eq('progreso: hoy lo que falta está pendiente, no mal', scoreDay(ev, slots, 'today', h).rows.MM1.level, 'todo');
     eq('progreso: entreno', [past.rows.ENT.level, scoreDay(ev, { ...slots, ENT: '20:00 Fuerza 1h' }, 'past', h).rows.ENT.level], ['none', 'good']);
-    eq('progreso: nota del día (media de comidas)', [Math.round(past.day.score * 100), past.day.level], [Math.round((0.8 + 0 + 0.3) / 3 * 100), 'bad']);
-    eq('progreso: día sin nada registrado = sin datos', [scoreDay(ev, {}, 'past', h).day.level, scoreDay(ev, {}, 'past', h).rows.DES.level], ['none', 'none']);
+    eq('progreso: día sin nada registrado = mal (no se hizo)', [scoreDay(ev, {}, 'past', h).day.level, scoreDay(ev, {}, 'past', h).rows.DES.level], ['bad', 'bad']);
+    const sl2 = { ...slots, MM1: '12:30 Manzana' };
+    const snack = scoreDay(evaluateDay(day, sl2, {}, false), sl2, 'past', h).rows.MM1;
+    eq('progreso: tentempié sano = bien aunque falte algo del menú', [snack.level, snack.missingGroups], ['good', ['FS']]);
+    const sl3 = { ...slots, DES: '9:30 Café con leche, croissant, zumo de naranja' };
+    const junk = scoreDay(evaluateDay(day, sl3, {}, false), sl3, 'past', () => 1).rows.DES;
+    eq('progreso: algo no sano = rojo aunque cumpla', [junk.level, junk.unhealthy], ['bad', ['bollería', 'zumo']]);
+
+    eq('no sano: refresco y embutido', unhealthyItems('14:00 Bocadillo de chorizo. Bebida: coca cola'), ['embutido', 'refresco']);
+    eq('no sano: versiones sin azúcar o sin alcohol no cuentan', ['Cocacola zero', 'Coca-cola cero', 'Cerveza 0,0', 'Cerveza 0', 'Tinto de verano 0', 'Cerveza sin alcohol', 'Macarrones con tomate frito', 'Corn flakes 0% azúcar', 'Café sin azúcar'].map(unhealthyItems), [[], [], [], [], [], [], [], [], []]);
+    eq('no sano: fritos, dulces, alcohol, nachos', ['Patatas fritas', 'Yogur con miel', 'Copa de vino', 'Nachos con guacamole', 'Tarta de queso', 'Galletas', 'Pizza'].map(t => unhealthyItems(t)[0]), ['fritos', 'azúcar', 'alcohol', 'nachos', 'tarta', 'galletas', 'comida rápida']);
+    eq('no sano: lo sano no cuenta', ['Merluza con patata cocida', 'Tortilla de patata', 'Pan integral con tomate', 'Salmón a la plancha con verduras'].map(unhealthyItems), [[], [], [], []]);
   }
 
   // ── Indicaciones de la nutricionista en ¿Qué como? ──

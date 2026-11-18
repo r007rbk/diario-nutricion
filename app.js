@@ -1,7 +1,7 @@
 'use strict';
 
 // Cambia junto con ?v= en index.html y VERSION en sw.js.
-const APP_VERSION = 14;
+const APP_VERSION = 15;
 // Versión del script de Google que necesita esta app (solo cambia cuando cambia Code.gs).
 const SCRIPT_REQUIRED = 7;
 
@@ -701,10 +701,13 @@ function applyHarvardAuto() {
 /** "Cumple 3 de 5" con cada punto ✓/✗ y qué cambiar para cumplirlo. */
 function renderHarvard() {
   const empty = !clean($('#foodText').value);
-  const ok = HARVARD.filter(h => form.harvard[h.key]).length;
+  const coreMiss = HARVARD.filter(h => HARVARD_CORE.includes(h.key) && !form.harvard[h.key]);
+  const bad = unhealthyItems(`${$('#foodText').value}. ${$('#drinkText').value}`);
   const sum = $('#harvardSum');
-  sum.textContent = empty ? '' : ok === HARVARD.length ? 'Cumple ✓' : `Cumple ${ok} de ${HARVARD.length}`;
-  sum.className = 'harvard-score' + (empty ? '' : ok === HARVARD.length ? ' good' : ok >= 3 ? ' mid' : ' bad');
+  sum.textContent = empty ? '' : bad.length ? '⚠︎ No sano' : !coreMiss.length ? 'Hecho ✓' : `Falta ${coreMiss.map(h => h.label.toLowerCase()).join(' y ')}`;
+  sum.className = 'harvard-score' + (empty ? '' : bad.length ? ' bad' : !coreMiss.length ? ' good' : coreMiss.length === 1 ? ' mid' : ' bad');
+  $('#unhealthyWarn').hidden = !bad.length;
+  $('#unhealthyWarn').textContent = bad.length ? `⚠︎ Cuenta como no sano (${bad.join(', ')}): esta comida saldrá en rojo en Progreso.` : '';
   [...$('#harvardItems').children].forEach(c => {
     const h = HARVARD.find(x => x.key === c.dataset.h);
     const yes = !!form.harvard[h.key];
@@ -714,7 +717,7 @@ function renderHarvard() {
   });
   const tips = HARVARD.filter(h => !form.harvard[h.key]).map(h => form.harvardAuto.tips[h.key]);
   $('#harvardTips').textContent = empty
-    ? 'Se valora solo con lo que pongas en la comida y la bebida.'
+    ? 'Se valora solo con lo que pongas en la comida y la bebida. Lo básico: verdura, proteína e integral.'
     : tips.length ? `Para cumplirlo: ${tips.join(' · ')}.` : 'Las cantidades no se comprueban: verdura la mitad, proteína y cereal un cuarto cada uno.';
 }
 
@@ -1218,11 +1221,15 @@ const progressSince = () => store.get('progressSince', PROGRESS_SINCE_DEFAULT);
 const MONTHS_LONG = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 const LEVEL_TEXT = { good: 'bien', mid: 'regular', bad: 'mal', todo: 'pendiente', none: 'sin datos', off: 'antes del esquema actual' };
 
-/** Plato Harvard de una celda del Sheet: parte que cumple (0..1). */
+// Plato Harvard básico: verdura (o fruta), proteína y cereal integral. Aceite y agua no se pueden
+// saber bien por el texto; las bebidas azucaradas ya restan como "no sano".
+const HARVARD_CORE = ['verdura', 'proteína', 'integral'];
+
+/** Plato Harvard básico de una celda del Sheet: parte que cumple (0..1). */
 function harvardScore(text) {
   const drinks = (String(text).match(/bebidas?\s*:\s*([^.\n]*)/i) || [])[1] || '';
   const r = harvardAuto(text, drinks);
-  return HARVARD.filter(h => r[h.key]).length / HARVARD.length;
+  return HARVARD_CORE.filter(k => r[k]).length / HARVARD_CORE.length;
 }
 
 /** Nota de cada día en [from, to] (ISO), con el esquema actual. */
@@ -1419,7 +1426,9 @@ function renderProgress() {
       let title = `${dayTitle(d).split(':')[0]} · ${row.label}: ${LEVEL_TEXT[r.level]}`;
       if (r.score != null) title += ` · ${pct(r.score)}`;
       if (r.missingGroups && r.missingGroups.length) title += ` · falta ${r.missingGroups.map(g => GROUP[g].label.toLowerCase()).join(', ')}`;
-      if (r.harvard != null) title += ` · Harvard ${Math.round(r.harvard * 5)}/5`;
+      if (r.harvard != null) title += ` · Harvard ${Math.round(r.harvard * 3)}/3`;
+      if (r.unhealthy && r.unhealthy.length) title += ` · no sano: ${r.unhealthy.join(', ')}`;
+      if (r.missing) title += ' · no registrado';
       if (row.key === 'ENT' && r.text) title += ` · ${r.text}`;
       return pcell(lvl, title, () => openDayInPlan(d.date));
     }, () => row.key === 'ENT'
