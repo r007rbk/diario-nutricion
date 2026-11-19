@@ -456,6 +456,54 @@ function scoreDay(ev, slots, status, harvardFn) {
   return { rows, day };
 }
 
+// ── Colores cambiados a mano ──
+// Nota que se usa para la media del día cuando el color se ha puesto a mano.
+const LEVEL_SCORE = { good: 1, mid: 0.7, bad: 0.2 };
+
+/** El plato de una celda, para recordar su color: sin hora, lugar, bebida ni suplementos. */
+function dishKey(text) {
+  return normText(String(text || '').split('\n')[0]
+    .replace(/^\s*\d{1,2}[:.]\d{2}\s*/, '')
+    .replace(/\b(bebidas?|suplementos?)\s*:[^.]*/gi, '')
+    .replace(/^\s*en (casa|la oficina|el trabajo|un restaurante|restaurante|casa de [^.,]+)\s*[.,]?\s*/i, ''))
+    .toLowerCase().replace(/[.\s]+$/, '').replace(/\s+/g, ' ').trim();
+}
+
+/** Regla de plato que se aplica a un texto (si hay varias, la de peor color). */
+function dishRuleFor(text, dishLevels) {
+  const t = ' ' + normText(text).toLowerCase().replace(/\s+/g, ' ') + ' ';
+  const order = { bad: 0, mid: 1, good: 2 };
+  let best = null;
+  for (const [k, level] of Object.entries(dishLevels || {})) {
+    if (k && t.includes(k) && (!best || order[level] < order[best.level])) best = { dish: k, level };
+  }
+  return best;
+}
+
+/**
+ * Aplica lo cambiado a mano a la nota de un día (scoreDay). Manda el color del día y la comida
+ * ("2026-11-18|CEN": "mid" o "none" para que no cuente); si no, la regla del plato.
+ */
+function applyLevelOverrides(sc, slots, date, dayLevels, dishLevels) {
+  for (const [key, r] of Object.entries(sc.rows)) {
+    if (key === 'ENT') continue;
+    const manual = dayLevels && dayLevels[`${date}|${key}`];
+    const text = String(slots[key] || '').trim();
+    const rule = !manual && text ? dishRuleFor(text, dishLevels) : null;
+    const level = manual || (rule && rule.level);
+    if (!level) continue;
+    r.auto = r.level;
+    r.manual = manual ? 'day' : 'dish';
+    if (rule) r.dish = rule.dish;
+    r.level = level;
+    r.score = level === 'none' ? null : LEVEL_SCORE[level];
+  }
+  const scores = Object.entries(sc.rows).filter(([k, r]) => k !== 'ENT' && r.score != null).map(([, r]) => r.score);
+  sc.day = scores.length ? { score: scores.reduce((a, b) => a + b, 0) / scores.length } : { score: null };
+  sc.day.level = sc.day.score == null ? 'none' : levelOf(sc.day.score);
+  return sc;
+}
+
 // ───────────────────────── ¿Qué como? ─────────────────────────
 
 /**

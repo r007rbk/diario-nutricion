@@ -179,6 +179,23 @@ const groups = t => classifyMeal(t).groups;
     eq('no sano: lo sano no cuenta', ['Merluza con patata cocida', 'Tortilla de patata', 'Pan integral con tomate', 'Salmón a la plancha con verduras'].map(unhealthyItems), [[], [], [], []]);
   }
 
+  // ── Colores cambiados a mano ──
+  {
+    eq('color: plato sin hora, lugar ni bebida', dishKey('22:00 en casa. Tortilla de patata con pimientos. Bebida: agua'), 'tortilla de patata con pimientos');
+    const day = { slots: { CEN: { groups: [{ g: 'VERDURA' }, { g: 'HUEVO' }], training: false }, MER: { groups: [{ g: 'LACTEO' }], training: false } } };
+    const slots = { CEN: '22:00 Tortilla de patata con pimientos', MER: '' };
+    const score = (dayLv, dishLv) => applyLevelOverrides(scoreDay(evaluateDay(day, slots, {}, false), slots, 'past', () => 1), slots, '2026-11-18', dayLv, dishLv);
+    eq('color: automático', [score().rows.CEN.level, score().rows.MER.level], ['good', 'bad']);
+    const rule = score({}, { 'tortilla de patata': 'mid' });
+    eq('color: regla de plato (tortilla de patata = regular)', [rule.rows.CEN.level, rule.rows.CEN.manual, rule.rows.CEN.auto, rule.rows.CEN.dish], ['mid', 'dish', 'good', 'tortilla de patata']);
+    const manual = score({ '2026-11-18|CEN': 'good' }, { 'tortilla de patata': 'mid' });
+    eq('color: lo cambiado ese día manda sobre la regla', [manual.rows.CEN.level, manual.rows.CEN.manual], ['good', 'day']);
+    const skip = score({ '2026-11-18|MER': 'none' });
+    eq('color: "no cuenta" saca la comida de la media', [skip.rows.MER.level, skip.day.score, skip.day.level], ['none', 1, 'good']);
+    eq('color: otro día no se ve afectado', applyLevelOverrides(scoreDay(evaluateDay(day, slots, {}, false), slots, 'past', () => 1), slots, '2026-11-19', { '2026-11-18|CEN': 'bad' }, {}).rows.CEN.level, 'good');
+    eq('color: varias reglas, la peor', dishRuleFor('Tortilla de patata con chorizo', { 'tortilla de patata': 'mid', chorizo: 'bad' }).level, 'bad');
+  }
+
   // ── Indicaciones de la nutricionista en ¿Qué como? ──
   {
     const C = texts => texts.map(t => ({ text: t, combo: false, groups: classifyMeal(t).groups }));

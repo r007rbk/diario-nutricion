@@ -1,9 +1,9 @@
 'use strict';
 
 // Cambia junto con ?v= en index.html y VERSION en sw.js.
-const APP_VERSION = 15;
+const APP_VERSION = 16;
 // Versión del script de Google que necesita esta app (solo cambia cuando cambia Code.gs).
-const SCRIPT_REQUIRED = 7;
+const SCRIPT_REQUIRED = 10;
 
 // Si algo falla, que se vea en pantalla en lugar de no hacer nada.
 window.addEventListener('error', e => toast(`Error: ${e.message}`));
@@ -242,7 +242,13 @@ async function flush() {
       } else if (op.op === 'stravaMark') {
         await api({ action: 'stravaMark', id: op.stravaId, status: op.status });
       } else if (op.op === 'config') {
-        await api({ action: 'setConfig', name: op.name, value: op.value });
+        try {
+          await api({ action: 'setConfig', name: op.name, value: op.value });
+        } catch (err) {
+          // Un script antiguo no conoce el ajuste: no bloquea el envío de las comidas.
+          if (!/Ajuste desconocido/.test(err.message)) throw err;
+          toast('Actualiza el script de Google para guardar ese ajuste');
+        }
       } else if (op.op === 'groups') {
         await api({ action: 'setGroups', key: op.key, groups: op.groups });
       } else {
@@ -1244,7 +1250,9 @@ function progressDays(from, to) {
     const trained = !!((view.slots.ENT || '').trim() || (view.slots.GYM || '').trim());
     const ev = evaluateDay(scheme[weekdayIndex(d)], view.slots, state.overrides, trained);
     const sc = scoreDay(ev, view.slots, d === today ? 'today' : 'past', harvardScore);
-    out.push({ date: d, known: view.known, ...sc });
+    const cfg = state.config || {};
+    applyLevelOverrides(sc, view.slots, d, cfg.LEVEL_DAYS, cfg.LEVEL_DISHES);
+    out.push({ date: d, known: view.known, slots: view.slots, ...sc });
   }
   return out;
 }
@@ -1430,7 +1438,10 @@ function renderProgress() {
       if (r.unhealthy && r.unhealthy.length) title += ` · no sano: ${r.unhealthy.join(', ')}`;
       if (r.missing) title += ' · no registrado';
       if (row.key === 'ENT' && r.text) title += ` · ${r.text}`;
-      return pcell(lvl, title, () => openDayInPlan(d.date));
+      if (r.manual) title += r.manual === 'day' ? ' · cambiado a mano' : ` · color de «${r.dish}»`;
+      const cell = pcell(lvl, title, row.key === 'ENT' ? () => openDayInPlan(d.date) : () => openLevelSheet(d, row));
+      if (r.manual) cell.classList.add('manual');
+      return cell;
     }, () => row.key === 'ENT'
       ? null
       : avg(days.filter(d => d.rows && d.rows[row.key].score != null).map(d => d.rows[row.key].score)));
@@ -1443,8 +1454,90 @@ function renderProgress() {
   const counted = days.filter(d => d.rows).length;
   const foot = document.createElement('p');
   foot.className = 'hint';
-  foot.textContent = counted ? `Entrenaste ${trainedDays} de ${counted} días. Toca un cuadro para ver ese día en el Menú ideal.` : 'Aún no hay días valorados en este periodo.';
+  foot.textContent = counted ? `Entrenaste ${trainedDays} de ${counted} días. Toca una comida para cambiar su color, o el día para verlo en el Menú ideal. Con punto: color cambiado a mano.` : 'Aún no hay días valorados en este periodo.';
   card.appendChild(foot);
+}
+
+// ── Cambiar el color de una comida ──
+
+const LEVEL_CHOICES = [
+  ['auto', 'Automático'], ['good', '🟩 Bien'], ['mid', '🟨 Regular'], ['bad', '🟥 Mal'], ['none', '⬜ No cuenta']
+];
+let levelEdit = null;
+
+function openLevelSheet(d, row) {
+  const r = d.rows[row.key];
+  const x = parseIso(d.date);
+  const text = String((d.slots || {})[row.key] || '').trim();
+  const cfg = state.config || {};
+  const dayKey = `${d.date}|${row.key}`;
+  const current = (cfg.LEVEL_DAYS || {})[dayKey] || 'auto';
+  const rule = text ? dishRuleFor(text, cfg.LEVEL_DISHES) : null;
+  levelEdit = { d, row, dayKey, choice: current, rule, text };
+  $('#levelTitle').textContent = `${row.label} · ${WEEKDAYS[x.getDay()]} ${x.getDate()} ${MONTHS[x.getMonth()]}`;
+  $('#levelText').textContent = text ? text.split('\n').join(' · ') : 'No hay nada registrado.';
+  const auto = r.auto || r.level;
+  const why = [];
+  if (r.missing) why.push('tocaba y no está registrada');
+  if (r.harvard != null && !r.missing) why.push(`Harvard ${Math.round(r.harvard * 3)}/3`);
+  if (r.menu != null) why.push(`menú ideal ${Math.round(r.menu * 100)} %`);
+  if (r.unhealthy && r.unhealthy.length) why.push(`no sano: ${r.unhealthy.join(', ')}`);
+  $('#levelWhy').textContent = `Propuesto: ${LEVEL_TEXT[auto] || '—'}${why.length ? ' (' + why.join(' · ') + ')' : ''}.`;
+  $('#levelRule').hidden = !rule;
+  if (rule) $('#levelRuleText').textContent = `Este plato tiene color fijo: «${rule.dish}» → ${LEVEL_TEXT[rule.level]}.`;
+  $('#levelRemember').checked = false;
+  $('#levelRemember').disabled = !text;
+  $('#levelDish').value = text ? dishKey(text) : '';
+  $('#levelDish').hidden = true;
+  const canSave = !state.scriptVersion || state.scriptVersion >= SCRIPT_REQUIRED;
+  $('#levelOld').hidden = canSave;
+  $('#levelSave').disabled = !canSave;
+  renderLevelChoices();
+  $('#levelSheet').showModal();
+}
+
+function renderLevelChoices() {
+  const box = $('#levelChoices');
+  box.innerHTML = '';
+  LEVEL_CHOICES.forEach(([k, label]) => box.appendChild(makeChip(label, {
+    on: levelEdit.choice === k,
+    onClick: () => { levelEdit.choice = k; renderLevelChoices(); }
+  })));
+}
+
+function saveLevel(e) {
+  e.preventDefault();
+  const cfg = state.config || {};
+  const { dayKey, choice } = levelEdit;
+  const days = { ...(cfg.LEVEL_DAYS || {}) };
+  const dishes = { ...(cfg.LEVEL_DISHES || {}) };
+  const remember = $('#levelRemember').checked && ['good', 'mid', 'bad', 'auto'].includes(choice);
+  const dish = dishKey($('#levelDish').value);
+  if (remember && dish) {
+    // Color fijo para el plato: manda en todos los días (salvo los cambiados a mano ese día).
+    if (choice === 'auto') delete dishes[dish]; else dishes[dish] = choice;
+    delete days[dayKey];
+    saveConfig('LEVEL_DISHES', dishes);
+    toast(choice === 'auto' ? `«${dish}» vuelve al color automático` : `«${dish}» saldrá siempre ${LEVEL_TEXT[choice]}`);
+  } else {
+    if (choice === 'auto') delete days[dayKey]; else days[dayKey] = choice;
+    // Solo se guardan los últimos 400 días (límite de tamaño del script).
+    const oldest = addDays(todayIso(), -400);
+    for (const k of Object.keys(days)) if (k.slice(0, 10) < oldest) delete days[k];
+    toast('Color cambiado ✓');
+  }
+  saveConfig('LEVEL_DAYS', days);
+  $('#levelSheet').close();
+  renderProgress();
+}
+
+function removeDishRule() {
+  const dishes = { ...((state.config || {}).LEVEL_DISHES || {}) };
+  delete dishes[levelEdit.rule.dish];
+  saveConfig('LEVEL_DISHES', dishes);
+  toast(`«${levelEdit.rule.dish}» vuelve al color automático`);
+  $('#levelSheet').close();
+  renderProgress();
 }
 
 // ───────────────────────── Configuración guardada en el script ─────────────────────────
@@ -2088,6 +2181,10 @@ function init() {
     renderProgress();
     loadProgressData();
   }));
+  $('#levelForm').addEventListener('submit', saveLevel);
+  $('#levelRemember').addEventListener('change', e => { $('#levelDish').hidden = !e.target.checked; });
+  $('#levelRuleRemove').addEventListener('click', removeDishRule);
+  $('#levelOpenDay').addEventListener('click', () => { $('#levelSheet').close(); openDayInPlan(levelEdit.d.date); });
   $('#progressSince').addEventListener('change', e => {
     if (!e.target.value) return;
     store.set('progressSince', e.target.value);

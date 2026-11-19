@@ -12,7 +12,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="styles.css?v=15">
+  <link rel="stylesheet" href="styles.css?v=16">
 </head>
 <body>
   <header class="topbar">
@@ -280,6 +280,27 @@
     </form>
   </dialog>
 
+  <!-- Cambiar el color de una comida (Progreso) -->
+  <dialog id="levelSheet" class="sheet">
+    <form method="dialog" id="levelForm">
+      <header class="sheet-head">
+        <h3 id="levelTitle">—</h3>
+        <button type="button" class="icon-btn" data-close aria-label="Cerrar">✕</button>
+      </header>
+      <p class="level-text" id="levelText"></p>
+      <p class="hint" id="levelWhy"></p>
+      <div class="chips" id="levelChoices"></div>
+      <label class="switch small"><input type="checkbox" id="levelRemember"> Recordar este color para el plato</label>
+      <input type="text" id="levelDish" class="list-input" aria-label="Plato" hidden>
+      <p class="hint" id="levelRule" hidden><span id="levelRuleText"></span> <button type="button" class="link" id="levelRuleRemove">Quitar</button></p>
+      <p class="hint" id="levelOld" hidden>⚠︎ Para guardar colores, actualiza el script de Google (Script 10).</p>
+      <div class="actions">
+        <button type="button" class="ghost" id="levelOpenDay">Ver el día</button>
+        <button type="submit" class="primary" id="levelSave">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Corregir grupos -->
   <dialog id="groupsSheet" class="sheet">
     <form method="dialog" id="groupsForm">
@@ -299,7 +320,7 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="plan.js?v=15"></script>
-  <script src="app.js?v=15"></script>
+  <script src="plan.js?v=16"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>

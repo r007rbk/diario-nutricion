@@ -32,7 +32,7 @@ var SLOT_HEADERS = {
 };
 
 // Súbelo cada vez que cambies este archivo: la app lo muestra en Ajustes → Versión.
-var SCRIPT_VERSION = 9;
+var SCRIPT_VERSION = 10;
 
 var HEADER_ROW = 2;
 var FIRST_DAY_ROW = 3;
@@ -343,7 +343,8 @@ function readWeek_(ss, start) {
 
 // ── Configuración de la app (listas de comida/bebida, diccionario) ──
 // Se guarda en propiedades del script: no ensucia el Sheet. Cada valor ≤ 9 KB.
-var CONFIG_NAME_RE = /^(PRESETS_(DES|MM1|MM2|COM|MER|AE|DU|DE|CEN|BEBIDAS|SUPLEMENTOS|LUGARES)|DICT_CUSTOM|STRAVA_SETTINGS)$/;
+// LEVEL_DAYS: colores de Progreso cambiados a mano por día y comida; LEVEL_DISHES: color fijo para un plato.
+var CONFIG_NAME_RE = /^(PRESETS_(DES|MM1|MM2|COM|MER|AE|DU|DE|CEN|BEBIDAS|SUPLEMENTOS|LUGARES)|DICT_CUSTOM|STRAVA_SETTINGS|LEVEL_DAYS|LEVEL_DISHES)$/;
 
 function readConfig_() {
   var all = PropertiesService.getScriptProperties().getProperties();
@@ -861,7 +862,7 @@ function probarHoy() {
 
 var EXPORT_TAB = 'AJUSTES_APP';
 // Lo que se lleva: botones, diccionario y correcciones de grupos. Nunca el token ni Strava.
-var EXPORT_NAME_RE = /^(PRESETS_[A-Z0-9]+|DICT_CUSTOM|GROUP_OVERRIDES)$/;
+var EXPORT_NAME_RE = /^(PRESETS_[A-Z0-9]+|DICT_CUSTOM|GROUP_OVERRIDES|LEVEL_DAYS|LEVEL_DISHES)$/;
 
 /** En la hoja de prueba: copia los ajustes de la app a una pestaña AJUSTES_APP. */
 function exportarAjustes() {
